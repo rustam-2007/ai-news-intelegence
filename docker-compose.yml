@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: news_intelligence_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: news_intelligence
+      POSTGRES_PASSWORD: news_intelligence_password
+      POSTGRES_DB: news_intelligence
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U news_intelligence"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - news_intelligence_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis for queues and caching
+  redis:
+    image: redis:7-alpine
+    container_name: news_intelligence_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - news_intelligence_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # NestJS API Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_intelligence_api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://news_intelligence:news_intelligence_password@postgres:5432/news_intelligence?schema=public
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - news_intelligence_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  news_intelligence_network:
+    driver: bridge
