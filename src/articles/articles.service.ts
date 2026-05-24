@@ -190,19 +190,23 @@ export class ArticlesService {
       summaryUz: string;
       category: string;
       aiModel: string;
+      aiRawResponse?: string | null;
     },
   ): Promise<Article> {
+    const data: Prisma.ArticleUpdateInput = {
+      status: 'APPROVED',
+      rewrittenTitleUz: aiOutput.rewrittenTitleUz,
+      summaryUz: aiOutput.summaryUz,
+      category: aiOutput.category,
+      aiModel: aiOutput.aiModel,
+      aiRawResponse: aiOutput.aiRawResponse ?? null,
+      processedAt: new Date(),
+      publishError: null,
+    };
+
     return this.prisma.article.update({
       where: { id },
-      data: {
-        status: 'APPROVED',
-        rewrittenTitleUz: aiOutput.rewrittenTitleUz,
-        summaryUz: aiOutput.summaryUz,
-        category: aiOutput.category,
-        aiModel: aiOutput.aiModel,
-        processedAt: new Date(),
-        publishError: null,
-      },
+      data,
     });
   }
 
@@ -217,29 +221,35 @@ export class ArticlesService {
     });
   }
 
-  async markFailed(id: number, errorMessage: string): Promise<Article> {
+  async markFailed(id: number, errorMessage: string, options?: { aiRawResponse?: string | null }): Promise<Article> {
+    const data: Prisma.ArticleUpdateInput = {
+      status: 'FAILED',
+      publishError: errorMessage,
+      aiRawResponse: options?.aiRawResponse,
+      retryCount: {
+        increment: 1,
+      },
+    };
+
     return this.prisma.article.update({
       where: { id },
-      data: {
-        status: 'FAILED',
-        publishError: errorMessage,
-        retryCount: {
-          increment: 1,
-        },
-      },
+      data,
     });
   }
 
   async resetForReprocess(id: number): Promise<Article> {
+    const data: Prisma.ArticleUpdateInput = {
+      status: 'NEW',
+      publishError: null,
+      processedAt: null,
+      retryCount: 0,
+      telegramMessageId: null,
+      aiRawResponse: null,
+    };
+
     return this.prisma.article.update({
       where: { id },
-      data: {
-        status: 'NEW',
-        publishError: null,
-        processedAt: null,
-        retryCount: 0,
-        telegramMessageId: null,
-      },
+      data,
     });
   }
 

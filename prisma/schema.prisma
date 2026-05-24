@@ -43,6 +43,7 @@ model Article {
   summaryUz         String?       @db.Text @map("summary_uz")
   category          String?       @db.VarChar(100) @map("category")
   aiModel           String?       @db.VarChar(100) @map("ai_model")
+  aiRawResponse     String?       @db.Text @map("ai_raw_response")
   processedAt       DateTime?     @map("processed_at")
   ingestedViaLatestOnly Boolean   @default(false) @map("ingested_via_latest_only")
   retryCount        Int           @default(0) @map("retry_count")

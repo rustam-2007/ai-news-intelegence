@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OpenAiService } from '../ai/openai.service';
+import { ConfigService } from '@nestjs/config';
+import { OpenAiResponseParseError, OpenAiService } from '../ai/openai.service';
 import { ArticleContentExtractorService } from '../ingestion/article-content-extractor.service';
 import { ArticleProcessingService } from './article-processing.service';
 import { ArticlesService } from './articles.service';
@@ -53,6 +54,13 @@ describe('ArticleProcessingService', () => {
       providers: [
         ArticleProcessingService,
         {
+          provide: ConfigService,
+          useValue: new ConfigService({
+            AI_MAX_INPUT_CHARS: 2500,
+            AI_MAX_PARAGRAPHS: 6,
+          }),
+        },
+        {
           provide: ArticlesService,
           useValue: articlesService,
         },
@@ -83,6 +91,7 @@ describe('ArticleProcessingService', () => {
       rewrittenTitleUz: 'Yangi sarlavha',
       summaryUz: 'Qisqa xulosa',
       category: 'jamiyat',
+      rawResponse: '{"rewrittenTitleUz":"Yangi sarlavha","summaryUz":"Qisqa xulosa","category":"jamiyat"}',
     });
     articlesService.markProcessing.mockResolvedValue({});
     articlesService.markApproved.mockResolvedValue({ id: 1, status: 'APPROVED', category: 'jamiyat' });
@@ -167,5 +176,133 @@ describe('ArticleProcessingService', () => {
         imageUrl: 'https://kun.uz/image.jpg',
       }),
     );
+  });
+
+  it('stores raw AI response when parsing fails', async () => {
+    articlesService.findOne.mockResolvedValue({
+      id: 4,
+      title: 'Test',
+      content: 'A'.repeat(300),
+      excerpt: 'Short excerpt',
+      status: 'NEW',
+    });
+    openAiService.isConfigured.mockReturnValue(true);
+    openAiService.processArticle.mockRejectedValue(
+      new OpenAiResponseParseError('Unable to parse AI response into article fields', 4, '{"broken":'),
+    );
+    articlesService.markProcessing.mockResolvedValue({});
+    articlesService.markFailed.mockResolvedValue({ id: 4, status: 'FAILED' });
+
+    await expect(service.processArticle(4)).rejects.toThrow('Unable to parse AI response into article fields');
+    expect(articlesService.markFailed).toHaveBeenCalledWith(
+      4,
+      'Unable to parse AI response into article fields',
+      { aiRawResponse: '{"broken":' },
+    );
+  });
+
+  it('sends only excerpt plus first meaningful paragraphs within limits', async () => {
+    const longParagraph = (label: string) => `${label} ` + 'A'.repeat(70);
+    articlesService.findOne.mockResolvedValue({
+      id: 5,
+      title: 'Test title',
+      content: [
+        'Related news: this should be skipped completely because it is noisy and not useful.',
+        longParagraph('Paragraph 1'),
+        'Telegram: follow us for more updates.',
+        longParagraph('Paragraph 2'),
+        longParagraph('Paragraph 3'),
+        longParagraph('Paragraph 4'),
+        longParagraph('Paragraph 5'),
+        longParagraph('Paragraph 6'),
+        longParagraph('Paragraph 7'),
+      ].join('\n\n'),
+      excerpt: 'Useful excerpt',
+      status: 'NEW',
+    });
+    openAiService.isConfigured.mockReturnValue(true);
+    openAiService.processArticle.mockResolvedValue({
+      rewrittenTitleUz: 'Yangi sarlavha',
+      summaryUz: 'Qisqa xulosa',
+      category: 'jamiyat',
+      rawResponse: '{"rewrittenTitleUz":"Yangi sarlavha","summaryUz":"Qisqa xulosa","category":"jamiyat"}',
+    });
+    articlesService.markProcessing.mockResolvedValue({});
+    articlesService.markApproved.mockResolvedValue({ id: 5, status: 'APPROVED', category: 'jamiyat' });
+
+    await service.processArticle(5);
+
+    expect(openAiService.processArticle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        articleId: 5,
+        title: 'Test title',
+        excerpt: 'Useful excerpt',
+        content: expect.stringContaining('Paragraph 1'),
+      }),
+    );
+
+    const aiInput = openAiService.processArticle.mock.calls[0][0].content as string;
+    expect(aiInput).toContain('Useful excerpt');
+    expect(aiInput).toContain('Paragraph 1');
+    expect(aiInput).toContain('Paragraph 6');
+    expect(aiInput).not.toContain('Paragraph 7');
+    expect(aiInput).not.toContain('this should be skipped completely');
+    expect(aiInput).not.toContain('Telegram: follow us');
+    expect(aiInput.length).toBeLessThanOrEqual(2500);
+  });
+
+  it('respects tighter truncation config', async () => {
+    const constrainedModule: TestingModule = await Test.createTestingModule({
+      providers: [
+        ArticleProcessingService,
+        {
+          provide: ConfigService,
+          useValue: new ConfigService({
+            AI_MAX_INPUT_CHARS: 160,
+            AI_MAX_PARAGRAPHS: 4,
+          }),
+        },
+        {
+          provide: ArticlesService,
+          useValue: articlesService,
+        },
+        {
+          provide: OpenAiService,
+          useValue: openAiService,
+        },
+        {
+          provide: ArticleContentExtractorService,
+          useValue: articleContentExtractorService,
+        },
+      ],
+    }).compile();
+
+    const constrainedService = constrainedModule.get<ArticleProcessingService>(ArticleProcessingService);
+    articlesService.findOne.mockResolvedValue({
+      id: 6,
+      title: 'Compact title',
+      content: [
+        'Paragraph 1 ' + 'B'.repeat(120),
+        'Paragraph 2 ' + 'C'.repeat(120),
+        'Paragraph 3 ' + 'D'.repeat(120),
+        'Paragraph 4 ' + 'E'.repeat(120),
+      ].join('\n\n'),
+      excerpt: 'Compact excerpt',
+      status: 'NEW',
+    });
+    openAiService.isConfigured.mockReturnValue(true);
+    openAiService.processArticle.mockResolvedValue({
+      rewrittenTitleUz: 'Yangi sarlavha',
+      summaryUz: 'Qisqa xulosa',
+      category: 'jamiyat',
+      rawResponse: '{"rewrittenTitleUz":"Yangi sarlavha","summaryUz":"Qisqa xulosa","category":"jamiyat"}',
+    });
+    articlesService.markProcessing.mockResolvedValue({});
+    articlesService.markApproved.mockResolvedValue({ id: 6, status: 'APPROVED', category: 'jamiyat' });
+
+    await constrainedService.processArticle(6);
+
+    const aiInput = openAiService.processArticle.mock.calls[0][0].content as string;
+    expect(aiInput.length).toBeLessThanOrEqual(160);
   });
 });
