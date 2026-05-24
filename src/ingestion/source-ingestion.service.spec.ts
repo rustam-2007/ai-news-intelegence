@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ArticleStatus } from '@prisma/client';
 import { ArticlesService } from '../articles/articles.service';
 import { SourcesService } from '../sources/sources.service';
+import { ArticleContentExtractorService } from './article-content-extractor.service';
 import { HtmlNewsParserService } from './html-news-parser.service';
 import { RssParserService } from './rss-parser.service';
 import { SourceIngestionService } from './source-ingestion.service';
@@ -10,6 +11,7 @@ describe('SourceIngestionService', () => {
   let service: SourceIngestionService;
   let rssParserService: { parseURL: jest.Mock };
   let htmlNewsParserService: { parseLatestPage: jest.Mock };
+  let articleContentExtractorService: { enrich: jest.Mock };
   let sourcesService: {
     findActive: jest.Mock;
     markFetchSuccess: jest.Mock;
@@ -62,6 +64,9 @@ describe('SourceIngestionService', () => {
     htmlNewsParserService = {
       parseLatestPage: jest.fn(),
     };
+    articleContentExtractorService = {
+      enrich: jest.fn((_, item) => Promise.resolve(item)),
+    };
     sourcesService = {
       findActive: jest.fn(),
       markFetchSuccess: jest.fn(),
@@ -83,6 +88,10 @@ describe('SourceIngestionService', () => {
         {
           provide: HtmlNewsParserService,
           useValue: htmlNewsParserService,
+        },
+        {
+          provide: ArticleContentExtractorService,
+          useValue: articleContentExtractorService,
         },
         {
           provide: SourcesService,

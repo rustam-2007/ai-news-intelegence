@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { ArticlesService } from '../articles/articles.service';
 import { SourcesService } from '../sources/sources.service';
 import { FetchSourcesQueryDto } from '../sources/dto/fetch-sources-query.dto';
+import { ArticleContentExtractorService } from './article-content-extractor.service';
 import { HtmlNewsParserService, ParsedNewsItem } from './html-news-parser.service';
 import { RssParserService } from './rss-parser.service';
 
@@ -38,6 +39,7 @@ export class SourceIngestionService {
   constructor(
     private readonly rssParserService: RssParserService,
     private readonly htmlNewsParserService: HtmlNewsParserService,
+    private readonly articleContentExtractorService: ArticleContentExtractorService,
     private readonly sourcesService: SourcesService,
     private readonly articlesService: ArticlesService,
   ) {}
@@ -75,12 +77,14 @@ export class SourceIngestionService {
       const skippedOldCount = normalizedItems.length - candidateItems.length;
       let newestInsertedPublishedAt: Date | null = latestStoredPublishedAt;
 
-      for (const normalized of candidateItems) {
-        const exists = await this.articlesService.existsByUrl(normalized.url);
+      for (const candidate of candidateItems) {
+        const exists = await this.articlesService.existsByUrl(candidate.url);
         if (exists) {
           duplicateCount += 1;
           continue;
         }
+
+        const normalized = await this.enrichCandidateItem(source, candidate);
 
         await this.articlesService.create({
           sourceId: source.id,
@@ -145,6 +149,19 @@ export class SourceIngestionService {
       publishedAt: this.parseDate(item.isoDate ?? item.pubDate ?? null),
       imageUrl: null,
     }));
+  }
+
+  private async enrichCandidateItem(source: Source, item: NormalizedNewsItem): Promise<NormalizedNewsItem> {
+    const enriched = await this.articleContentExtractorService.enrich(source.baseUrl, {
+      title: item.title,
+      url: item.url,
+      content: item.content,
+      excerpt: item.excerpt,
+      publishedAt: item.publishedAt,
+      imageUrl: item.imageUrl,
+    });
+
+    return this.normalizeItem(enriched, item.feedIndex) ?? item;
   }
 
   private normalizeItem(item: ParsedNewsItem, feedIndex: number): NormalizedNewsItem | null {
