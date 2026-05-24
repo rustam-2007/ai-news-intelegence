@@ -36,7 +36,7 @@ describe('ArticlePublishingService', () => {
 
     telegramService = {
       publishArticle: jest.fn(),
-      isConfigured: jest.fn(),
+      isConfigured: jest.fn().mockReturnValue(true),
     };
 
     const module: TestingModule = await Test.createTestingModule({

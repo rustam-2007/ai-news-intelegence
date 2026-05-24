@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Article } from '@prisma/client';
 import { TelegramService } from '../telegram/telegram.service';
 import { ArticleProcessingService } from './article-processing.service';
@@ -16,17 +16,42 @@ export class ArticlePublishingService {
 
   async publishArticle(articleId: number): Promise<Article> {
     const currentArticle = await this.articlesService.findOne(articleId);
-    if (currentArticle.status === 'NEW') {
+    this.logger.log(`publish requested articleId=${articleId} status=${currentArticle.status}`);
+
+    if (currentArticle.status === 'PROCESSING') {
+      throw new ConflictException({
+        code: 'ARTICLE_ALREADY_PROCESSING',
+        articleId,
+        message: 'Article is currently being processed',
+      });
+    }
+
+    if (currentArticle.status === 'NEW' || this.shouldReprocessFailedArticle(currentArticle)) {
+      this.logger.log(`running AI processing before publish for articleId=${articleId}`);
       await this.articleProcessingService.processArticle(articleId);
     }
 
     const article = await this.articlesService.findOneForPublishing(articleId);
-    if (article.status !== 'APPROVED' && article.status !== 'PUBLISHED') {
-      throw new Error(`Article ${articleId} is not ready for publishing`);
-    }
-
     if (article.status === 'PUBLISHED') {
       return article;
+    }
+
+    if (article.status !== 'APPROVED' && !this.canRetryFailedPublish(article)) {
+      throw new ConflictException({
+        code: 'ARTICLE_NOT_READY_FOR_PUBLISHING',
+        articleId,
+        status: article.status,
+        publishError: article.publishError,
+        message: `Article ${articleId} is not ready for publishing`,
+      });
+    }
+
+    if (!this.telegramService.isConfigured()) {
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_NOT_CONFIGURED',
+        articleId,
+        message: 'Telegram publishing is not configured',
+      });
     }
 
     try {
@@ -38,7 +63,11 @@ export class ArticlePublishingService {
       const message = error instanceof Error ? error.message : 'Unknown publishing error';
       await this.articlesService.markFailed(article.id, message);
       this.logger.error(`failed to publish articleId=${article.id} error=${message}`);
-      throw error;
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_PUBLISH_FAILED',
+        articleId: article.id,
+        message,
+      });
     }
   }
 
@@ -62,5 +91,19 @@ export class ArticlePublishingService {
 
     this.logger.log(`auto-publish completed published=${publishedCount} scanned=${articles.length}`);
     return publishedCount;
+  }
+
+  private shouldReprocessFailedArticle(article: Article): boolean {
+    return article.status === 'FAILED' && !article.rewrittenTitleUz && !article.summaryUz;
+  }
+
+  private canRetryFailedPublish(
+    article: Article & {
+      source: {
+        name: string;
+      };
+    },
+  ): boolean {
+    return article.status === 'FAILED' && Boolean(article.rewrittenTitleUz || article.summaryUz);
   }
 }

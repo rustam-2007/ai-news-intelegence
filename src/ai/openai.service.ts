@@ -24,6 +24,13 @@ export class OpenAiService {
     return Boolean(this.client);
   }
 
+  getConfigStatus() {
+    return {
+      openAiConfigured: this.isConfigured(),
+      model: this.model,
+    };
+  }
+
   getModel(): string {
     return this.model;
   }

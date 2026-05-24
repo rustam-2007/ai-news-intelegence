@@ -6,7 +6,7 @@ import { ArticlePublishingService } from './article-publishing.service';
 export class ArticlePublishingScheduler {
   constructor(private readonly articlePublishingService: ArticlePublishingService) {}
 
-  @Cron('0 */5 * * * *')
+  @Cron('0 */5 * * * *', { timeZone: 'Asia/Tashkent' })
   async handleCron(): Promise<void> {
     await this.articlePublishingService.publishNewArticles();
   }

@@ -63,6 +63,7 @@ export class SourceIngestionService {
     const limit = options?.limit ?? DEFAULT_LATEST_ONLY_LIMIT;
 
     try {
+      this.logger.log(`fetching source=${source.name} type=${source.sourceType} latestOnly=${latestOnly} limit=${limit}`);
       const parsedItems = await this.parseSource(source);
       const normalizedItems = parsedItems
         .map((item, index) => this.normalizeItem(item, index))
@@ -84,7 +85,7 @@ export class SourceIngestionService {
         await this.articlesService.create({
           sourceId: source.id,
           title: normalized.title,
-          url: normalized.url,
+          url: this.normalizeUrl(normalized.url),
           content: normalized.content,
           excerpt: normalized.excerpt,
           imageUrl: normalized.imageUrl,
@@ -148,7 +149,7 @@ export class SourceIngestionService {
 
   private normalizeItem(item: ParsedNewsItem, feedIndex: number): NormalizedNewsItem | null {
     const title = item.title?.trim();
-    const url = item.url?.trim();
+    const url = this.normalizeUrl(item.url?.trim() ?? '');
 
     if (!title || !url) {
       return null;
@@ -226,6 +227,30 @@ export class SourceIngestionService {
     return createHash('sha256')
       .update([title, content ?? '', excerpt ?? ''].join('||'))
       .digest('hex');
+  }
+
+  private normalizeUrl(url: string): string {
+    if (!url) {
+      return url;
+    }
+
+    try {
+      const parsed = new URL(url);
+      parsed.hash = '';
+      for (const key of [...parsed.searchParams.keys()]) {
+        if (key.toLowerCase().startsWith('utm_')) {
+          parsed.searchParams.delete(key);
+        }
+      }
+
+      if (parsed.pathname.length > 1) {
+        parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+      }
+
+      return parsed.toString();
+    } catch {
+      return url;
+    }
   }
 
   private maxDate(current: Date | null, next: Date | null): Date | null {

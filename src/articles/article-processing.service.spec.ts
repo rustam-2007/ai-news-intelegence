@@ -83,10 +83,7 @@ describe('ArticleProcessingService', () => {
     });
     articlesService.markFailed.mockResolvedValue({ id: 2, status: 'FAILED' });
 
-    await expect(service.processArticle(2)).resolves.toMatchObject({
-      id: 2,
-      status: 'FAILED',
-    });
+    await expect(service.processArticle(2)).rejects.toThrow('Article content is too short for AI processing');
     expect(articlesService.markFailed).toHaveBeenCalledWith(2, 'Article content is too short for AI processing');
   });
 });

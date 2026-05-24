@@ -5,6 +5,7 @@ import { ArticlesModule } from './articles/articles.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
+import { DebugModule } from './debug/debug.module';
 import { HealthModule } from './health/health.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { SourcesModule } from './sources/sources.module';
@@ -18,6 +19,7 @@ import { SourcesModule } from './sources/sources.module';
     ScheduleModule.forRoot(),
     DatabaseModule,
     ArticlesModule,
+    DebugModule,
     HealthModule,
     IngestionModule,
     SourcesModule,

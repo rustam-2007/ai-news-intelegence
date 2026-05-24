@@ -42,6 +42,31 @@ export class SourcesService {
     });
   }
 
+  async findAllWithLatestArticle() {
+    return this.prisma.source.findMany({
+      orderBy: {
+        id: 'asc',
+      },
+      include: {
+        articles: {
+          take: 1,
+          orderBy: [
+            { createdAt: 'desc' },
+          ],
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            createdAt: true,
+            publishedAt: true,
+            publishError: true,
+            telegramMessageId: true,
+          },
+        },
+      },
+    });
+  }
+
   async findOne(id: number): Promise<Source> {
     const source = await this.prisma.source.findUnique({
       where: { id },

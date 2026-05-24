@@ -38,6 +38,46 @@ export class ArticlesService {
     return article?.publishedAt ?? null;
   }
 
+  async getStatusCounts(): Promise<Array<{ status: string; count: number }>> {
+    const rows = await this.prisma.article.groupBy({
+      by: ['status'],
+      _count: {
+        _all: true,
+      },
+    });
+
+    return rows.map((row) => ({
+      status: row.status,
+      count: row._count._all,
+    }));
+  }
+
+  async findLatestPublishAttempt() {
+    return this.prisma.article.findFirst({
+      where: {
+        OR: [
+          { status: 'PUBLISHED' },
+          { status: 'FAILED' },
+          { retryCount: { gt: 0 } },
+          { telegramMessageId: { not: null } },
+        ],
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+      select: {
+        id: true,
+        sourceId: true,
+        title: true,
+        status: true,
+        updatedAt: true,
+        publishError: true,
+        telegramMessageId: true,
+        retryCount: true,
+      },
+    });
+  }
+
   async findOne(id: number): Promise<Article> {
     const article = await this.prisma.article.findUnique({
       where: { id },

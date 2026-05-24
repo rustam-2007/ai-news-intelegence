@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Article, Source } from '@prisma/client';
 
@@ -11,6 +11,7 @@ type PublishableArticle = Pick<
 
 interface TelegramSendMessageResponse {
   ok: boolean;
+  error_code?: number;
   result?: {
     message_id: number;
   };
@@ -32,6 +33,13 @@ export class TelegramService {
     return Boolean(this.botToken && this.channelId);
   }
 
+  getConfigStatus() {
+    return {
+      botTokenConfigured: Boolean(this.botToken),
+      channelConfigured: Boolean(this.channelId),
+    };
+  }
+
   formatArticleMessage(article: PublishableArticle): string {
     const title = this.escapeHtml(article.rewrittenTitleUz?.trim() || article.title);
     const excerpt = this.escapeHtml(article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.');
@@ -49,7 +57,11 @@ export class TelegramService {
 
   async publishArticle(article: PublishableArticle): Promise<string> {
     if (!this.botToken || !this.channelId) {
-      throw new Error('Telegram publishing is not configured');
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_NOT_CONFIGURED',
+        articleId: article.id,
+        message: 'Telegram publishing is not configured',
+      });
     }
 
     const response = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
@@ -65,15 +77,37 @@ export class TelegramService {
       }),
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      this.logger.error(`telegram publish failed with status=${response.status} body=${text}`);
-      throw new Error(`Telegram API request failed with status ${response.status}`);
+    const responseText = await response.text();
+    let payload: TelegramSendMessageResponse | null = null;
+
+    try {
+      payload = responseText ? (JSON.parse(responseText) as TelegramSendMessageResponse) : null;
+    } catch {
+      payload = null;
     }
 
-    const payload = (await response.json()) as TelegramSendMessageResponse;
-    if (!payload.ok || !payload.result) {
-      throw new Error(payload.description || 'Telegram API returned an invalid response');
+    if (!response.ok) {
+      this.logger.error(
+        `telegram publish failed articleId=${article.id} status=${response.status} channelConfigured=true description=${payload?.description ?? responseText}`,
+      );
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_HTTP_ERROR',
+        articleId: article.id,
+        statusCode: response.status,
+        message: payload?.description || `Telegram API request failed with status ${response.status}`,
+      });
+    }
+
+    if (!payload || !payload.ok || !payload.result) {
+      this.logger.error(
+        `telegram publish failed articleId=${article.id} errorCode=${payload?.error_code ?? 'unknown'} description=${payload?.description ?? 'invalid response'}`,
+      );
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_API_ERROR',
+        articleId: article.id,
+        telegramErrorCode: payload?.error_code,
+        message: payload?.description || 'Telegram API returned an invalid response',
+      });
     }
 
     return String(payload.result.message_id);

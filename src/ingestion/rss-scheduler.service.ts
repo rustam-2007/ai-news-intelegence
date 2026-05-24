@@ -8,9 +8,15 @@ export class RssSchedulerService {
 
   constructor(private readonly sourceIngestionService: SourceIngestionService) {}
 
-  @Cron('0 */15 * * * *')
+  @Cron('0 */15 * * * *', { timeZone: 'Asia/Tashkent' })
   async handleCron(): Promise<void> {
-    const results = await this.sourceIngestionService.fetchActiveSources();
-    this.logger.log(`completed scheduled ingestion for ${results.length} sources`);
+    this.logger.log('starting scheduled source ingestion');
+    try {
+      const results = await this.sourceIngestionService.fetchActiveSources();
+      this.logger.log(`completed scheduled ingestion for ${results.length} sources`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown source ingestion scheduler error';
+      this.logger.error(`scheduled source ingestion failed error=${message}`);
+    }
   }
 }

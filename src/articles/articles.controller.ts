@@ -15,7 +15,14 @@ export class ArticlesController {
   }
 
   @Post(':id/publish')
-  publish(@Param('id', ParseIntPipe) id: number) {
-    return this.articlePublishingService.publishArticle(id);
+  async publish(@Param('id', ParseIntPipe) id: number) {
+    const article = await this.articlePublishingService.publishArticle(id);
+
+    return {
+      success: true,
+      articleId: article.id,
+      status: article.status,
+      telegramMessageId: article.telegramMessageId,
+    };
   }
 }
