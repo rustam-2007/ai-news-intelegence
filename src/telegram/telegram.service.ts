@@ -18,6 +18,13 @@ interface TelegramSendMessageResponse {
   description?: string;
 }
 
+interface TelegramPayload {
+  text: string;
+  parseMode?: 'HTML';
+}
+
+const TELEGRAM_TEXT_LIMIT = 4096;
+
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
@@ -64,53 +71,113 @@ export class TelegramService {
       });
     }
 
-    const response = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
+    const payload = this.buildTelegramPayload(article);
+    let response = await this.sendMessage(payload);
+    let responseText = await response.text();
+    let parsedPayload = this.parseTelegramResponse(responseText);
+
+    if (this.shouldRetryAsPlainText(response, parsedPayload)) {
+      this.logger.warn(`telegram publish retrying as plain text articleId=${article.id}`);
+      response = await this.sendMessage(this.buildPlainTextPayload(article));
+      responseText = await response.text();
+      parsedPayload = this.parseTelegramResponse(responseText);
+    }
+
+    if (!response.ok) {
+      this.logger.error(
+        `telegram publish failed articleId=${article.id} status=${response.status} channelConfigured=true description=${parsedPayload?.description ?? responseText}`,
+      );
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_HTTP_ERROR',
+        articleId: article.id,
+        statusCode: response.status,
+        message: parsedPayload?.description || `Telegram API request failed with status ${response.status}`,
+      });
+    }
+
+    if (!parsedPayload || !parsedPayload.ok || !parsedPayload.result) {
+      this.logger.error(
+        `telegram publish failed articleId=${article.id} errorCode=${parsedPayload?.error_code ?? 'unknown'} description=${parsedPayload?.description ?? 'invalid response'}`,
+      );
+      throw new ServiceUnavailableException({
+        code: 'TELEGRAM_API_ERROR',
+        articleId: article.id,
+        telegramErrorCode: parsedPayload?.error_code,
+        message: parsedPayload?.description || 'Telegram API returned an invalid response',
+      });
+    }
+
+    return String(parsedPayload.result.message_id);
+  }
+
+  buildTelegramPayload(article: PublishableArticle): TelegramPayload {
+    const title = this.escapeHtml(article.rewrittenTitleUz?.trim() || article.title);
+    const excerpt = this.escapeHtml(article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.');
+    const sourceName = this.escapeHtml(article.source.name);
+    const sourceLink = this.escapeHtml(article.url);
+
+    const baseParts = [`<b>${title}</b>`, '', excerpt, '', `<a href="${sourceLink}">Read on ${sourceName}</a>`];
+    let text = baseParts.join('\n');
+
+    if (text.length > TELEGRAM_TEXT_LIMIT) {
+      const reserve = text.length - excerpt.length;
+      const allowedExcerptLength = Math.max(160, TELEGRAM_TEXT_LIMIT - reserve - 3);
+      const trimmedExcerpt = `${excerpt.slice(0, allowedExcerptLength).trim()}...`;
+      text = [`<b>${title}</b>`, '', trimmedExcerpt, '', `<a href="${sourceLink}">Read on ${sourceName}</a>`].join('\n');
+    }
+
+    return {
+      text,
+      parseMode: 'HTML',
+    };
+  }
+
+  buildPlainTextPayload(article: PublishableArticle): TelegramPayload {
+    const title = this.escapePlainText(article.rewrittenTitleUz?.trim() || article.title);
+    const excerpt = this.escapePlainText(article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.');
+    const sourceName = this.escapePlainText(article.source.name);
+    let text = [title, '', excerpt, '', `Read on ${sourceName}: ${article.url}`].join('\n');
+
+    if (text.length > TELEGRAM_TEXT_LIMIT) {
+      text = `${text.slice(0, TELEGRAM_TEXT_LIMIT - 3).trim()}...`;
+    }
+
+    return {
+      text,
+    };
+  }
+
+  private async sendMessage(payload: TelegramPayload): Promise<Response> {
+    return fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         chat_id: this.channelId,
-        text: this.formatArticleMessage(article),
-        parse_mode: 'HTML',
+        text: payload.text,
+        parse_mode: payload.parseMode,
         disable_web_page_preview: false,
       }),
     });
+  }
 
-    const responseText = await response.text();
-    let payload: TelegramSendMessageResponse | null = null;
-
+  private parseTelegramResponse(responseText: string): TelegramSendMessageResponse | null {
     try {
-      payload = responseText ? (JSON.parse(responseText) as TelegramSendMessageResponse) : null;
+      return responseText ? (JSON.parse(responseText) as TelegramSendMessageResponse) : null;
     } catch {
-      payload = null;
+      return null;
     }
+  }
 
-    if (!response.ok) {
-      this.logger.error(
-        `telegram publish failed articleId=${article.id} status=${response.status} channelConfigured=true description=${payload?.description ?? responseText}`,
-      );
-      throw new ServiceUnavailableException({
-        code: 'TELEGRAM_HTTP_ERROR',
-        articleId: article.id,
-        statusCode: response.status,
-        message: payload?.description || `Telegram API request failed with status ${response.status}`,
-      });
-    }
-
-    if (!payload || !payload.ok || !payload.result) {
-      this.logger.error(
-        `telegram publish failed articleId=${article.id} errorCode=${payload?.error_code ?? 'unknown'} description=${payload?.description ?? 'invalid response'}`,
-      );
-      throw new ServiceUnavailableException({
-        code: 'TELEGRAM_API_ERROR',
-        articleId: article.id,
-        telegramErrorCode: payload?.error_code,
-        message: payload?.description || 'Telegram API returned an invalid response',
-      });
-    }
-
-    return String(payload.result.message_id);
+  private shouldRetryAsPlainText(
+    response: Response,
+    payload: TelegramSendMessageResponse | null,
+  ): boolean {
+    return (
+      response.status === 400 &&
+      Boolean(payload?.description?.toLowerCase().includes('parse') || payload?.description?.toLowerCase().includes('entity'))
+    );
   }
 
   private escapeHtml(value: string): string {
@@ -119,5 +186,9 @@ export class TelegramService {
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
+  }
+
+  private escapePlainText(value: string): string {
+    return value.replace(/\s+/g, ' ').trim();
   }
 }

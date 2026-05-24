@@ -100,6 +100,18 @@ export class ArticleProcessingService {
     return processedCount;
   }
 
+  async reprocessArticle(articleId: number): Promise<Article> {
+    const article = await this.articlesService.findOne(articleId);
+    this.logger.log(`manual reprocess requested articleId=${article.id} status=${article.status}`);
+
+    if (article.status === 'PUBLISHED') {
+      return article;
+    }
+
+    await this.articlesService.resetForReprocess(article.id);
+    return this.processArticle(article.id);
+  }
+
   private buildProcessingInput(title: string, content: string | null, excerpt: string | null): string {
     return [title, excerpt ?? '', content ?? ''].join('\n\n').trim().slice(0, MAX_PROCESSING_INPUT_LENGTH);
   }

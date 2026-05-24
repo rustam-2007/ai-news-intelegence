@@ -199,6 +199,19 @@ export class ArticlesService {
     });
   }
 
+  async resetForReprocess(id: number): Promise<Article> {
+    return this.prisma.article.update({
+      where: { id },
+      data: {
+        status: 'NEW',
+        publishError: null,
+        processedAt: null,
+        retryCount: 0,
+        telegramMessageId: null,
+      },
+    });
+  }
+
   async existsByUrl(url: string): Promise<boolean> {
     const article = await this.prisma.article.findUnique({
       where: { url },

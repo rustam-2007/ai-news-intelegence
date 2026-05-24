@@ -53,8 +53,12 @@ export class ArticleContentExtractorService {
       this.resolveUrl(
         sourceBaseUrl,
         $('meta[property="og:image"]').attr('content') ||
+          $('meta[name="twitter:image"]').attr('content') ||
+          this.extractSrcsetUrl(contentRoot?.find('img').first().attr('srcset') || null) ||
           contentRoot?.find('img').first().attr('src') ||
           contentRoot?.find('img').first().attr('data-src') ||
+          this.extractSrcsetUrl($('img').first().attr('srcset') || null) ||
+          $('img').first().attr('src') ||
           seed.imageUrl ||
           null,
       ) || seed.imageUrl;
@@ -74,13 +78,13 @@ export class ArticleContentExtractorService {
 
     for (const selector of selectors) {
       const node = $(selector).first();
-      if (node.length && this.normalizeText(node.text()).length > 120) {
+      if (node.length && (this.normalizeText(node.text()).length > 120 || node.find('p').length >= 2)) {
         return node;
       }
     }
 
     const generic = $('article, main').first();
-    if (generic.length && this.normalizeText(generic.text()).length > 120) {
+    if (generic.length && (this.normalizeText(generic.text()).length > 120 || generic.find('p').length >= 2)) {
       return generic;
     }
 
@@ -124,11 +128,13 @@ export class ArticleContentExtractorService {
   }
 
   private extractBodyText(root: cheerio.Cheerio<any>): string | null {
-    const paragraphs = root
-      .find('p')
+    const blocks = root
+      .find('p, li, blockquote, h2, h3')
       .toArray()
       .map((element) => this.normalizeText(cheerio.load(element).text()))
       .filter((text) => text.length > 20);
+
+    const paragraphs = this.deduplicateSequential(blocks);
 
     if (paragraphs.length > 0) {
       return paragraphs.join('\n\n');
@@ -171,13 +177,16 @@ export class ArticleContentExtractorService {
 
   private cleanTitle(title: string | null): string {
     const normalized = this.normalizeText(title);
-
-    return normalized
+    const withoutTimestamps = normalized
       .replace(/^\d{1,2}:\d{2}\s*[-–—]?\s*/u, '')
       .replace(/^\d{1,2}\.\d{1,2}\.\d{4}\s+\d{1,2}:\d{2}\s*[-–—]?\s*/u, '')
       .replace(/\s*[-–—]\s*\d{1,2}:\d{2}$/u, '')
       .replace(/\s*[-–—]\s*\d{1,2}\.\d{1,2}\.\d{4}\s+\d{1,2}:\d{2}$/u, '')
       .trim();
+    const deduplicated = this.removeDuplicatedHeadline(withoutTimestamps);
+    const withoutMergedPreview = this.removeMergedPreview(deduplicated);
+
+    return withoutMergedPreview.trim();
   }
 
   private normalizeText(value: string | null | undefined): string {
@@ -197,5 +206,74 @@ export class ArticleContentExtractorService {
     } catch {
       return null;
     }
+  }
+
+  private extractSrcsetUrl(value: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const candidates = value
+      .split(',')
+      .map((entry) => entry.trim().split(/\s+/u)[0])
+      .filter(Boolean);
+
+    return candidates[candidates.length - 1] ?? null;
+  }
+
+  private deduplicateSequential(values: string[]): string[] {
+    const result: string[] = [];
+
+    for (const value of values) {
+      if (result[result.length - 1] !== value) {
+        result.push(value);
+      }
+    }
+
+    return result;
+  }
+
+  private removeDuplicatedHeadline(title: string): string {
+    const parts = title
+      .split(/\s[-–—|]\s/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length >= 2 && parts[0].toLowerCase() === parts[1].toLowerCase()) {
+      return parts[0];
+    }
+
+    const repeatedHalf = title.match(/^(.{15,}?)\s+\1$/u);
+    if (repeatedHalf) {
+      return repeatedHalf[1].trim();
+    }
+
+    const repeatedLeadingPhrase = title.match(/^(.{10,}?)\s+\1(?=[.!?]|$)/u);
+    if (repeatedLeadingPhrase) {
+      return repeatedLeadingPhrase[1].trim();
+    }
+
+    return title;
+  }
+
+  private removeMergedPreview(title: string): string {
+    const sentenceParts = title
+      .split(/(?<=[.!?])\s+/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (sentenceParts.length > 1) {
+      return sentenceParts[0];
+    }
+
+    const previewMarkers = [' Batafsil', ' Davomi', ' Foto', ' Video'];
+    for (const marker of previewMarkers) {
+      const index = title.indexOf(marker);
+      if (index > 20) {
+        return title.slice(0, index).trim();
+      }
+    }
+
+    return title;
   }
 }
