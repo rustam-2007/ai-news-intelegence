@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, IsUrl, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUrl, Max, Min } from 'class-validator';
 
 export class CreateSourceDto {
   @IsString()
@@ -11,10 +11,21 @@ export class CreateSourceDto {
   })
   baseUrl!: string;
 
+  @IsOptional()
+  @IsIn(['RSS', 'HTML'])
+  sourceType?: 'RSS' | 'HTML';
+
+  @IsOptional()
   @IsUrl({
     require_tld: false,
   })
-  rssUrl!: string;
+  rssUrl?: string;
+
+  @IsOptional()
+  @IsUrl({
+    require_tld: false,
+  })
+  latestPageUrl?: string;
 
   @IsOptional()
   @IsBoolean()

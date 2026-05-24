@@ -19,6 +19,25 @@ export class ArticlesService {
     return this.prisma.article.create({ data });
   }
 
+  async findLatestPublishedAtForSource(sourceId: number): Promise<Date | null> {
+    const article = await this.prisma.article.findFirst({
+      where: {
+        sourceId,
+        publishedAt: {
+          not: null,
+        },
+      },
+      orderBy: {
+        publishedAt: 'desc',
+      },
+      select: {
+        publishedAt: true,
+      },
+    });
+
+    return article?.publishedAt ?? null;
+  }
+
   async findOne(id: number): Promise<Article> {
     const article = await this.prisma.article.findUnique({
       where: { id },
@@ -54,6 +73,7 @@ export class ArticlesService {
     return this.prisma.article.findMany({
       where: {
         status: 'APPROVED',
+        ingestedViaLatestOnly: true,
       },
       include: {
         source: {
@@ -73,6 +93,7 @@ export class ArticlesService {
     return this.prisma.article.findMany({
       where: {
         status: 'NEW',
+        ingestedViaLatestOnly: true,
       },
       orderBy: {
         createdAt: 'asc',

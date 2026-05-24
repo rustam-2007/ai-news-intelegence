@@ -10,10 +10,16 @@ datasource db {
 model Source {
   id                   Int       @id @default(autoincrement())
   name                 String    @db.VarChar(255)
+  sourceType           SourceType @default(RSS) @map("source_type")
   baseUrl              String    @db.VarChar(2048) @map("base_url")
-  rssUrl               String    @unique @db.VarChar(2048) @map("rss_url")
+  rssUrl               String?   @unique @db.VarChar(2048) @map("rss_url")
+  latestPageUrl        String?   @db.VarChar(2048) @map("latest_page_url")
   isActive             Boolean   @default(true) @map("is_active")
   fetchIntervalMinutes Int       @default(15) @map("fetch_interval_minutes")
+  lastFetchedAt        DateTime? @map("last_fetched_at")
+  latestArticlePublishedAt DateTime? @map("latest_article_published_at")
+  lastSuccessAt        DateTime? @map("last_success_at")
+  lastError            String?   @db.Text @map("last_error")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
   articles             Article[]
@@ -29,6 +35,7 @@ model Article {
   url               String        @unique @db.VarChar(2048)
   content           String?       @db.Text
   excerpt           String?       @db.Text
+  imageUrl          String?       @db.VarChar(2048) @map("image_url")
   publishedAt       DateTime?     @map("published_at")
   contentHash       String        @db.VarChar(64) @map("content_hash")
   status            ArticleStatus @default(NEW)
@@ -37,6 +44,7 @@ model Article {
   category          String?       @db.VarChar(100) @map("category")
   aiModel           String?       @db.VarChar(100) @map("ai_model")
   processedAt       DateTime?     @map("processed_at")
+  ingestedViaLatestOnly Boolean   @default(false) @map("ingested_via_latest_only")
   retryCount        Int           @default(0) @map("retry_count")
   telegramMessageId String?       @db.VarChar(255) @map("telegram_message_id")
   publishError      String?       @db.Text @map("publish_error")
@@ -57,4 +65,9 @@ enum ArticleStatus {
   APPROVED
   PUBLISHED
   FAILED
+}
+
+enum SourceType {
+  RSS
+  HTML
 }

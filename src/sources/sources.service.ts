@@ -8,11 +8,15 @@ export class SourcesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createSourceDto: CreateSourceDto): Promise<Source> {
+    const sourceType = createSourceDto.sourceType ?? 'RSS';
+
     return this.prisma.source.create({
       data: {
         name: createSourceDto.name.trim(),
+        sourceType,
         baseUrl: createSourceDto.baseUrl.trim(),
-        rssUrl: createSourceDto.rssUrl.trim(),
+        rssUrl: createSourceDto.rssUrl?.trim(),
+        latestPageUrl: createSourceDto.latestPageUrl?.trim(),
         isActive: createSourceDto.isActive ?? true,
         fetchIntervalMinutes: createSourceDto.fetchIntervalMinutes ?? 15,
       },
@@ -64,6 +68,33 @@ export class SourcesService {
 
     return this.prisma.source.delete({
       where: { id },
+    });
+  }
+
+  async markFetchSuccess(
+    id: number,
+    data: {
+      latestArticlePublishedAt?: Date | null;
+    },
+  ): Promise<Source> {
+    return this.prisma.source.update({
+      where: { id },
+      data: {
+        lastFetchedAt: new Date(),
+        lastSuccessAt: new Date(),
+        lastError: null,
+        latestArticlePublishedAt: data.latestArticlePublishedAt ?? undefined,
+      },
+    });
+  }
+
+  async markFetchError(id: number, errorMessage: string): Promise<Source> {
+    return this.prisma.source.update({
+      where: { id },
+      data: {
+        lastFetchedAt: new Date(),
+        lastError: errorMessage,
+      },
     });
   }
 }
