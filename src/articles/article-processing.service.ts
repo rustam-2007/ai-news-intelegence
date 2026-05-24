@@ -1,6 +1,8 @@
-import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException, forwardRef } from '@nestjs/common';
 import { Article } from '@prisma/client';
+import { createHash } from 'crypto';
 import { OpenAiService } from '../ai/openai.service';
+import { ArticleContentExtractorService } from '../ingestion/article-content-extractor.service';
 import { ArticlesService } from './articles.service';
 
 const MIN_ARTICLE_TEXT_LENGTH = 40;
@@ -13,6 +15,8 @@ export class ArticleProcessingService {
   constructor(
     private readonly articlesService: ArticlesService,
     private readonly openAiService: OpenAiService,
+    @Inject(forwardRef(() => ArticleContentExtractorService))
+    private readonly articleContentExtractorService: ArticleContentExtractorService,
   ) {}
 
   async processArticle(articleId: number): Promise<Article> {
@@ -108,11 +112,75 @@ export class ArticleProcessingService {
       return article;
     }
 
+    await this.refreshArticleContent(article.id);
     await this.articlesService.resetForReprocess(article.id);
     return this.processArticle(article.id);
   }
 
+  async reprocessFailedArticles(limit = 20): Promise<{
+    requested: number;
+    reprocessedCount: number;
+    failedCount: number;
+    articles: Array<{ articleId: number; status: string; error?: string }>;
+  }> {
+    const articles = await this.articlesService.findFailedForReprocessing(limit);
+    const results: Array<{ articleId: number; status: string; error?: string }> = [];
+    let reprocessedCount = 0;
+
+    for (const article of articles) {
+      try {
+        const updated = await this.reprocessArticle(article.id);
+        results.push({ articleId: updated.id, status: updated.status });
+        reprocessedCount += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown reprocess error';
+        this.logger.error(`bulk reprocess failed articleId=${article.id} error=${message}`);
+        results.push({ articleId: article.id, status: 'FAILED', error: message });
+      }
+    }
+
+    return {
+      requested: articles.length,
+      reprocessedCount,
+      failedCount: articles.length - reprocessedCount,
+      articles: results,
+    };
+  }
+
   private buildProcessingInput(title: string, content: string | null, excerpt: string | null): string {
     return [title, excerpt ?? '', content ?? ''].join('\n\n').trim().slice(0, MAX_PROCESSING_INPUT_LENGTH);
+  }
+
+  private async refreshArticleContent(articleId: number): Promise<void> {
+    const article = await this.articlesService.findOneWithSource(articleId);
+
+    try {
+      const enriched = await this.articleContentExtractorService.enrich(article.source.baseUrl, {
+        title: article.title,
+        url: article.url,
+        content: article.content,
+        excerpt: article.excerpt,
+        publishedAt: article.publishedAt,
+        imageUrl: article.imageUrl,
+      });
+
+      await this.articlesService.updateExtractedContent(article.id, {
+        title: enriched.title,
+        content: enriched.content,
+        excerpt: enriched.excerpt,
+        imageUrl: enriched.imageUrl,
+        contentHash: this.createContentHash(enriched.title, enriched.content, enriched.excerpt),
+      });
+      this.logger.log(`refreshed article content articleId=${article.id} source=${article.source.name}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown refresh error';
+      this.logger.warn(`article content refresh failed articleId=${article.id} source=${article.source.name} error=${message}`);
+    }
+  }
+
+  private createContentHash(title: string, content: string | null, excerpt: string | null): string {
+    return createHash('sha256')
+      .update([title, content ?? '', excerpt ?? ''].join('||'))
+      .digest('hex');
   }
 }

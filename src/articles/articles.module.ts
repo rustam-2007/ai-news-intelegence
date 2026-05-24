@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
+import { IngestionModule } from '../ingestion/ingestion.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { ArticleProcessingScheduler } from './article-processing.scheduler';
 import { ArticleProcessingService } from './article-processing.service';
@@ -9,7 +10,7 @@ import { ArticlesController } from './articles.controller';
 import { ArticlesService } from './articles.service';
 
 @Module({
-  imports: [AiModule, TelegramModule],
+  imports: [AiModule, TelegramModule, forwardRef(() => IngestionModule)],
   controllers: [ArticlesController],
   providers: [
     ArticlesService,

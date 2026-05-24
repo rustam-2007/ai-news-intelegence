@@ -87,7 +87,7 @@ export class HtmlNewsParserService {
       anchor.find('h1, h2, h3, h4').first().text().trim();
 
     if (titleCandidate) {
-      return titleCandidate;
+      return this.cleanTitle(titleCandidate);
     }
 
     const parsed = this.parseAnchorText(anchor.text());
@@ -104,7 +104,7 @@ export class HtmlNewsParserService {
       anchor.find('p').first().text().trim();
 
     if (excerptCandidate && excerptCandidate !== title) {
-      return excerptCandidate;
+      return this.cleanExcerpt(excerptCandidate, title);
     }
 
     const parsed = this.parseAnchorText(anchor.text());
@@ -136,8 +136,10 @@ export class HtmlNewsParserService {
     baseUrl: string,
   ): string | null {
     const imageSrc =
+      this.extractSrcsetUrl(container.find('img').first().attr('srcset') || null) ||
       container.find('img').first().attr('src') ||
       container.find('img').first().attr('data-src') ||
+      this.extractSrcsetUrl(anchor.find('img').first().attr('srcset') || null) ||
       anchor.find('img').first().attr('src') ||
       anchor.find('img').first().attr('data-src');
 
@@ -175,9 +177,10 @@ export class HtmlNewsParserService {
       .filter(Boolean);
 
     if (sentenceParts.length >= 2) {
+      const title = this.cleanTitle(sentenceParts[0]);
       return {
-        title: sentenceParts[0],
-        excerpt: sentenceParts.slice(1).join(' '),
+        title,
+        excerpt: this.cleanExcerpt(sentenceParts.slice(1).join(' '), title),
         dateText,
       };
     }
@@ -187,18 +190,103 @@ export class HtmlNewsParserService {
       .map((part) => part.trim())
       .filter(Boolean);
     if (dashParts.length >= 2) {
+      const title = this.cleanTitle(dashParts[0]);
       return {
-        title: dashParts[0],
-        excerpt: dashParts.slice(1).join(' '),
+        title,
+        excerpt: this.cleanExcerpt(dashParts.slice(1).join(' '), title),
         dateText,
       };
     }
 
     return {
-      title: remaining,
+      title: this.cleanTitle(remaining),
       excerpt: null,
       dateText,
     };
+  }
+
+  private cleanTitle(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    const withoutTimestamp = normalized
+      .replace(/^\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\s*/u, '')
+      .replace(/^\d{2}:\d{2}\s*/u, '')
+      .trim();
+
+    return this.removeMergedPreview(this.removeDuplicatedHeadline(withoutTimestamp));
+  }
+
+  private cleanExcerpt(value: string, title: string): string | null {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const withoutTimestamp = normalized
+      .replace(/^\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\s*/u, '')
+      .replace(/^\d{2}:\d{2}\s*/u, '')
+      .trim();
+    const withoutLeadingTitle = withoutTimestamp.startsWith(title)
+      ? withoutTimestamp.slice(title.length).replace(/^[:\-–—.\s]+/u, '').trim()
+      : withoutTimestamp;
+
+    return withoutLeadingTitle && withoutLeadingTitle !== title ? withoutLeadingTitle : null;
+  }
+
+  private extractSrcsetUrl(value: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const candidates = value
+      .split(',')
+      .map((entry) => entry.trim().split(/\s+/u)[0])
+      .filter(Boolean);
+
+    return candidates[candidates.length - 1] ?? null;
+  }
+
+  private removeDuplicatedHeadline(title: string): string {
+    const parts = title
+      .split(/\s[-–—|]\s/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length >= 2 && parts[0].toLowerCase() === parts[1].toLowerCase()) {
+      return parts[0];
+    }
+
+    const repeatedHalf = title.match(/^(.{15,}?)\s+\1$/u);
+    if (repeatedHalf) {
+      return repeatedHalf[1].trim();
+    }
+
+    const repeatedLeadingPhrase = title.match(/^(.{10,}?)\s+\1(?=[.!?]|$)/u);
+    if (repeatedLeadingPhrase) {
+      return repeatedLeadingPhrase[1].trim();
+    }
+
+    return title;
+  }
+
+  private removeMergedPreview(title: string): string {
+    const sentenceParts = title
+      .split(/(?<=[.!?])\s+/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (sentenceParts.length > 1) {
+      return sentenceParts[0];
+    }
+
+    const previewMarkers = [' Batafsil', ' Davomi', ' Foto', ' Video'];
+    for (const marker of previewMarkers) {
+      const index = title.indexOf(marker);
+      if (index > 20) {
+        return title.slice(0, index).trim();
+      }
+    }
+
+    return title;
   }
 
   private parseDate(value: string): Date | null {

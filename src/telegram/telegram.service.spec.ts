@@ -17,6 +17,7 @@ describe('TelegramService', () => {
       excerpt: 'Short & useful',
       rewrittenTitleUz: 'Yangi <sarlavha>',
       summaryUz: 'Qisqa & aniq',
+      imageUrl: null,
       source: { name: 'Example' },
     });
 
@@ -40,14 +41,24 @@ describe('TelegramService', () => {
       excerpt: 'x'.repeat(5000),
       rewrittenTitleUz: 'Sarlavha',
       summaryUz: 'x'.repeat(5000),
+      imageUrl: null,
       source: { name: 'Example' },
     };
 
     const payload = service.buildTelegramPayload(article);
+    const markdownPayload = service.buildMarkdownPayload(article);
     const plainTextPayload = service.buildPlainTextPayload(article);
+    const photoPayload = service.buildPhotoPayload({
+      ...article,
+      imageUrl: 'https://example.com/image.jpg',
+    });
 
     expect(payload.text.length).toBeLessThanOrEqual(4096);
     expect(payload.parseMode).toBe('HTML');
+    expect(markdownPayload.text.length).toBeLessThanOrEqual(4096);
+    expect(markdownPayload.parseMode).toBe('MarkdownV2');
     expect(plainTextPayload.text.length).toBeLessThanOrEqual(4096);
+    expect(photoPayload.caption.length).toBeLessThanOrEqual(1024);
+    expect(photoPayload.photo).toBe('https://example.com/image.jpg');
   });
 });

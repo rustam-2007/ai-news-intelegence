@@ -109,6 +109,21 @@ export class ArticlesService {
     return article;
   }
 
+  async findOneWithSource(id: number) {
+    const article = await this.prisma.article.findUnique({
+      where: { id },
+      include: {
+        source: true,
+      },
+    });
+
+    if (!article) {
+      throw new NotFoundException(`Article ${id} not found`);
+    }
+
+    return article;
+  }
+
   async findNewForPublishing(limit = 10) {
     return this.prisma.article.findMany({
       where: {
@@ -138,6 +153,22 @@ export class ArticlesService {
       orderBy: {
         createdAt: 'asc',
       },
+      take: limit,
+    });
+  }
+
+  async findFailedForReprocessing(limit = 20) {
+    return this.prisma.article.findMany({
+      where: {
+        status: 'FAILED',
+      },
+      include: {
+        source: true,
+      },
+      orderBy: [
+        { updatedAt: 'asc' },
+        { createdAt: 'asc' },
+      ],
       take: limit,
     });
   }
@@ -208,6 +239,28 @@ export class ArticlesService {
         processedAt: null,
         retryCount: 0,
         telegramMessageId: null,
+      },
+    });
+  }
+
+  async updateExtractedContent(
+    id: number,
+    data: {
+      title: string;
+      content: string | null;
+      excerpt: string | null;
+      imageUrl: string | null;
+      contentHash: string;
+    },
+  ): Promise<Article> {
+    return this.prisma.article.update({
+      where: { id },
+      data: {
+        title: data.title,
+        content: data.content,
+        excerpt: data.excerpt,
+        imageUrl: data.imageUrl,
+        contentHash: data.contentHash,
       },
     });
   }

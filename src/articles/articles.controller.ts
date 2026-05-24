@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
+import { Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { ArticlePublishingService } from './article-publishing.service';
 import { ArticleProcessingService } from './article-processing.service';
 import { ArticlesService } from './articles.service';
@@ -14,6 +14,16 @@ export class ArticlesController {
   @Get()
   findAll() {
     return this.articlesService.findAll();
+  }
+
+  @Post('reprocess-failed')
+  async reprocessFailed(@Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number) {
+    const result = await this.articleProcessingService.reprocessFailedArticles(limit);
+
+    return {
+      success: true,
+      ...result,
+    };
   }
 
   @Post(':id/publish')

@@ -8,7 +8,7 @@ import { RssSchedulerService } from './rss-scheduler.service';
 import { SourceIngestionService } from './source-ingestion.service';
 
 @Module({
-  imports: [forwardRef(() => SourcesModule), ArticlesModule],
+  imports: [forwardRef(() => SourcesModule), forwardRef(() => ArticlesModule)],
   providers: [
     RssParserService,
     HtmlNewsParserService,
@@ -16,6 +16,6 @@ import { SourceIngestionService } from './source-ingestion.service';
     SourceIngestionService,
     RssSchedulerService,
   ],
-  exports: [SourceIngestionService],
+  exports: [SourceIngestionService, ArticleContentExtractorService],
 })
 export class IngestionModule {}

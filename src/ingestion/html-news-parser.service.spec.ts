@@ -29,4 +29,25 @@ describe('HtmlNewsParserService', () => {
       imageUrl: 'https://zamon.uz/images/pokiston.jpg',
     });
   });
+
+  it('cleans Zamon timestamps and duplicate headline text from anchor text', () => {
+    const service = new HtmlNewsParserService();
+    const html = `
+      <section>
+        <a href="/uz/2026/05/24/tesla">
+          14:24 Toshkentda Tesla’ni 214 km tezlikda boshqargan haydovchiga chora ko‘rildi
+          Toshkentda Tesla’ni 214 km tezlikda boshqargan haydovchiga chora ko‘rildi.
+          Haydovchi yuqori tezlikda harakatlangani uchun pushaymon ekanini aytgan.
+        </a>
+      </section>
+    `;
+
+    const items = service.parseHtml(html, 'https://zamon.uz');
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      title: 'Toshkentda Tesla’ni 214 km tezlikda boshqargan haydovchiga chora ko‘rildi',
+      excerpt: 'Haydovchi yuqori tezlikda harakatlangani uchun pushaymon ekanini aytgan.',
+    });
+  });
 });
