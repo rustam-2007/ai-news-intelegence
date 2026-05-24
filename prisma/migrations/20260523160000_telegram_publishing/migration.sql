@@ -1,0 +1,4 @@
+ALTER TABLE "articles" ADD COLUMN "retry_count" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "articles" ADD COLUMN "telegram_message_id" VARCHAR(255);
+ALTER TABLE "articles" ADD COLUMN "publish_error" TEXT;
+ALTER TABLE "articles" ADD COLUMN "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

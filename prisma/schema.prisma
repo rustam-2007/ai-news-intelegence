@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,291 +7,54 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ========================================
-// MVP Models - Phase 1
-// ========================================
-
 model Source {
-  id                Int      @id @default(autoincrement())
-  name              String   @db.VarChar(255)
-  url               String   @unique @db.VarChar(2048)
-  rss_url           String   @db.VarChar(2048)
+  id                   Int       @id @default(autoincrement())
+  name                 String    @db.VarChar(255)
+  baseUrl              String    @db.VarChar(2048) @map("base_url")
+  rssUrl               String    @unique @db.VarChar(2048) @map("rss_url")
+  isActive             Boolean   @default(true) @map("is_active")
+  fetchIntervalMinutes Int       @default(15) @map("fetch_interval_minutes")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  articles             Article[]
 
-  // Health monitoring
-  is_active         Boolean  @default(true)
-  last_fetched_at   DateTime?
-  last_success_at   DateTime?
-  health_score      Int      @default(100)
-  error_count       Int      @default(0)
-  consecutive_failures Int   @default(0)
-
-  // Rate limiting
-  rate_limit        Int      @default(10)
-
-  // Metadata
-  description       String?  @db.Text
-  language          String   @default("ru") @db.VarChar(10)
-
-  // Timestamps
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  // Relations
-  articles          Article[]
-  crawl_logs        CrawlLog[]
-
-  @@index([is_active])
-  @@index([last_fetched_at])
-  @@index([health_score])
+  @@index([isActive])
   @@map("sources")
 }
 
 model Article {
-  id                Int      @id @default(autoincrement())
-  source_id         Int
+  id                Int           @id @default(autoincrement())
+  sourceId          Int           @map("source_id")
+  title             String        @db.VarChar(1000)
+  url               String        @unique @db.VarChar(2048)
+  content           String?       @db.Text
+  excerpt           String?       @db.Text
+  publishedAt       DateTime?     @map("published_at")
+  contentHash       String        @db.VarChar(64) @map("content_hash")
+  status            ArticleStatus @default(NEW)
+  rewrittenTitleUz  String?       @db.VarChar(1000) @map("rewritten_title_uz")
+  summaryUz         String?       @db.Text @map("summary_uz")
+  category          String?       @db.VarChar(100) @map("category")
+  aiModel           String?       @db.VarChar(100) @map("ai_model")
+  processedAt       DateTime?     @map("processed_at")
+  retryCount        Int           @default(0) @map("retry_count")
+  telegramMessageId String?       @db.VarChar(255) @map("telegram_message_id")
+  publishError      String?       @db.Text @map("publish_error")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  source            Source        @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
-  // Original article data
-  original_title    String   @db.VarChar(1000)
-  original_url      String   @unique @db.VarChar(2048)
-  original_content  String?  @db.Text
-  published_at      DateTime?
-  author            String?  @db.VarChar(255)
-
-  // AI-processed data
-  summary           String?  @db.Text
-  category_id       Int?
-  tags              String[]
-  language          String?  @db.VarChar(10)
-
-  // Status workflow
-  status            ArticleStatus @default(PENDING)
-
-  // Moderation
-  moderated_by       String? @db.VarChar(255)
-  moderated_at       DateTime?
-  moderation_notes   String?  @db.Text
-
-  // Telegram publishing
-  telegram_message_id Int?
-  telegram_channel_id String? @db.VarChar(255)
-  published_to_telegram_at DateTime?
-
-  // AI metadata
-  ai_model_summary   String?  @db.VarChar(50)
-  ai_model_category String?  @db.VarChar(50)
-  ai_cost_cents     Int      @default(0)
-  processing_time_ms Int?
-
-  // Timestamps
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  // Relations
-  source            Source    @relation(fields: [source_id], references: [id], onDelete: Cascade)
-  category          Category? @relation(fields: [category_id], references: [id])
-  telegram_posts    TelegramPost[]
-  crawl_logs        CrawlLog[]
-  moderation_queue  ModerationQueue?
-
-  @@index([source_id])
+  @@index([sourceId])
   @@index([status])
-  @@index([category_id])
-  @@index([published_at(sort: Desc)])
-  @@index([created_at(sort: Desc)])
-  @@index([telegram_message_id])
+  @@index([publishedAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
   @@map("articles")
 }
 
-model Category {
-  id                Int      @id @default(autoincrement())
-  name              String   @unique @db.VarChar(100)
-  slug              String   @unique @db.VarChar(100)
-  description       String?  @db.Text
-
-  // Display settings
-  emoji             String?  @db.VarChar(10)
-  color             String?  @db.VarChar(7)
-  priority          Int      @default(0)
-  is_active         Boolean  @default(true)
-
-  // Telegram settings
-  telegram_channel_id String? @db.VarChar(255)
-
-  // Timestamps
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  // Relations
-  articles          Article[]
-
-  @@index([is_active])
-  @@index([slug])
-  @@map("categories")
-}
-
-model TelegramPost {
-  id                Int      @id @default(autoincrement())
-  article_id        Int
-
-  // Telegram metadata
-  channel_id        String   @db.VarChar(255)
-  message_id        Int
-
-  // Message content
-  content           String   @db.Text
-  image_id          String?  @db.VarChar(255)
-
-  // Publishing
-  scheduled_for     DateTime?
-  posted_at         DateTime?
-  status            TelegramPostStatus @default(PENDING)
-
-  // Error handling
-  error_message     String?  @db.Text
-  retry_count       Int      @default(0)
-  max_retries       Int      @default(5)
-
-  // Timestamps
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  // Relations
-  article           Article  @relation(fields: [article_id], references: [id], onDelete: Cascade)
-
-  @@index([channel_id])
-  @@index([message_id])
-  @@index([article_id])
-  @@index([scheduled_for])
-  @@index([status])
-  @@map("telegram_posts")
-}
-
-model CrawlLog {
-  id                Int      @id @default(autoincrement())
-  source_id         Int
-  article_id        Int?
-
-  // Crawl metrics
-  articles_found    Int      @default(0)
-  articles_processed Int     @default(0)
-  articles_new      Int      @default(0)
-  articles_duplicates Int    @default(0)
-  articles_failed   Int      @default(0)
-
-  // Timing
-  started_at        DateTime
-  completed_at      DateTime?
-  duration_ms       Int?
-
-  // Error handling
-  error_message     String?  @db.Text
-  error_type        String?  @db.VarChar(100)
-
-  // Additional metadata
-  metadata          Json?
-
-  // Timestamps
-  created_at        DateTime @default(now())
-
-  // Relations
-  source            Source    @relation(fields: [source_id], references: [id], onDelete: Cascade)
-  article           Article? @relation(fields: [article_id], references: [id], onDelete: Cascade)
-
-  @@index([source_id])
-  @@index([article_id])
-  @@index([started_at(sort: Desc)])
-  @@index([created_at(sort: Desc)])
-  @@map("crawl_logs")
-}
-
-model ModerationQueue {
-  id                Int      @id @default(autoincrement())
-  article_id        Int
-  priority          Int      @default(0)
-
-  // Queue status
-  status            QueueStatus @default(PENDING)
-  assigned_to       String?  @db.VarChar(255)
-  assigned_at       DateTime?
-
-  // Timestamps
-  created_at        DateTime @default(now())
-  processed_at      DateTime?
-
-  // Relations
-  article           Article  @relation(fields: [article_id], references: [id], onDelete: Cascade)
-
-  @@unique([article_id])
-  @@index([status])
-  @@index([priority(sort: Desc)])
-  @@index([assigned_to])
-  @@map("moderation_queue")
-}
-
-model User {
-  id                Int      @id @default(autoincrement())
-  email             String   @unique @db.VarChar(255)
-  username          String   @unique @db.VarChar(100)
-  password_hash     String   @db.VarChar(255)
-
-  // Profile
-  full_name         String?  @db.VarChar(255)
-
-  // Role and permissions
-  role              UserRole  @default(VIEWER)
-  permissions       String[]
-
-  // Account status
-  is_active         Boolean  @default(true)
-  email_verified    Boolean  @default(false)
-
-  // Timestamps
-  last_login_at     DateTime?
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  @@index([email])
-  @@index([username])
-  @@index([is_active])
-  @@map("users")
-}
-
-// ========================================
-// Enums
-// ========================================
-
 enum ArticleStatus {
   NEW
-  EXTRACTING
   PROCESSING
-  PENDING
   APPROVED
-  REJECTED
   PUBLISHED
   FAILED
-}
-
-enum TelegramPostStatus {
-  PENDING
-  SCHEDULED
-  POSTING
-  PUBLISHED
-  FAILED
-  CANCELLED
-}
-
-enum QueueStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-enum UserRole {
-  VIEWER
-  EDITOR
-  MODERATOR
-  ADMIN
-  SUPER_ADMIN
 }
