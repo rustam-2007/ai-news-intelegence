@@ -13,6 +13,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "n8n:deploy:facebook": "node scripts/deploy-n8n-facebook-workflow.js",
     "seed:sources": "node --env-file=.env scripts/seed-default-sources.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",

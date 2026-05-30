@@ -58,11 +58,52 @@ Do not store real tokens or secrets in the repository.
 Workflow file:
 `n8n/facebook-crosspost.workflow.json`
 
+Manual UI import:
+
 1. Open `https://n8n.patirstudy.uz`.
 2. Import `n8n/facebook-crosspost.workflow.json`.
 3. Confirm the webhook path is `facebook-crosspost`.
 4. Set `FACEBOOK_API_VERSION`, `FACEBOOK_PAGE_ID`, `FACEBOOK_PAGE_ACCESS_TOKEN`, and `N8N_FACEBOOK_WEBHOOK_SECRET` in n8n.
-5. Activate the workflow after validation.
+5. Publish the workflow after validation.
+
+Scripted deployment from code:
+
+1. In n8n, create an API key: `Settings -> n8n API -> Create API key`.
+2. Export the local deployment env vars:
+
+```env
+N8N_BASE_URL=https://n8n.patirstudy.uz
+N8N_API_KEY=<n8n-api-key>
+N8N_FACEBOOK_WORKFLOW_PATH=n8n/facebook-crosspost.workflow.json
+N8N_ACTIVATE_WORKFLOW=true
+```
+
+3. Run:
+
+```bash
+node scripts/deploy-n8n-facebook-workflow.js
+```
+
+Or through `package.json`:
+
+```bash
+npm run n8n:deploy:facebook
+```
+
+The deployment script:
+
+- validates the workflow JSON before any API call
+- never logs `N8N_API_KEY` or `FACEBOOK_PAGE_ACCESS_TOKEN`
+- looks up a workflow by name first and updates it instead of creating a duplicate when possible
+- can skip the API call with `N8N_DRY_RUN=true`
+
+Dry run example:
+
+```bash
+N8N_DRY_RUN=true npm run n8n:deploy:facebook
+```
+
+If the n8n public API on your instance rejects workflow updates because of version-specific payload differences, use the manual UI import path above as the fallback and then publish the workflow in the UI.
 
 Webhook URL expected by the backend:
 
@@ -71,6 +112,13 @@ https://n8n.patirstudy.uz/webhook/facebook-crosspost
 ```
 
 The backend sends `X-N8N-Webhook-Secret` and n8n validates it before calling Meta Graph API.
+
+The workflow JSON is expected to read these values from n8n env or credentials and must not hardcode the secret/token values:
+
+- `FACEBOOK_API_VERSION`
+- `FACEBOOK_PAGE_ID`
+- `FACEBOOK_PAGE_ACCESS_TOKEN`
+- `N8N_FACEBOOK_WEBHOOK_SECRET`
 
 ## Message and payload contract
 
@@ -148,6 +196,13 @@ curl -X POST "http://localhost:3000/articles/retry-facebook-crosspost"
 
 ## Verification
 
+Check workflow status in n8n:
+
+1. Open `https://n8n.patirstudy.uz`.
+2. Open the `facebook-crosspost` workflow.
+3. Confirm the workflow is published.
+4. Confirm the webhook path is still `facebook-crosspost`.
+
 Check the debug endpoint:
 
 ```bash
@@ -169,6 +224,37 @@ Check one article in the DB or API and confirm:
 - `facebookPostedAt`
 - `facebookPostError`
 - `facebookPostRetryCount`
+
+Manual webhook test against n8n:
+
+```bash
+curl -X POST "https://n8n.patirstudy.uz/webhook/facebook-crosspost" \
+  -H "Content-Type: application/json" \
+  -H "X-N8N-Webhook-Secret: <same-shared-secret>" \
+  -d '{
+    "event": "article.published.telegram",
+    "article": {
+      "id": 123,
+      "sourceId": 1,
+      "sourceName": "Kun",
+      "title": "Test title",
+      "rewrittenTitleUz": "Test title",
+      "summaryUz": "Test summary",
+      "excerpt": "Test excerpt",
+      "url": "https://example.com/articles/123",
+      "imageUrl": null,
+      "category": "news",
+      "publishedAt": null,
+      "processedAt": null,
+      "telegramMessageId": "12345"
+    },
+    "facebook": {
+      "dedupeKey": "article-123",
+      "message": "Test title\n\nTest summary\n\nManba: Kun\nBatafsil: https://example.com/articles/123",
+      "link": "https://example.com/articles/123"
+    }
+  }'
+```
 
 ## Troubleshooting
 
