@@ -10,6 +10,7 @@ import { getTashkentDayRange } from './tashkent-time.util';
 export class ArticlePublishingService {
   private readonly logger = new Logger(ArticlePublishingService.name);
   private readonly autoPublishEnabled: boolean;
+  private readonly telegramPublishingEnabled: boolean;
   private readonly autoPublishMaxPerRun: number;
   private readonly autoPublishFreshHours: number;
   private readonly telegramDailyPublishLimit: number;
@@ -21,7 +22,8 @@ export class ArticlePublishingService {
     private readonly telegramService: TelegramService,
   ) {
     this.autoPublishEnabled = this.getBooleanConfig('AUTO_PUBLISH_ENABLED', true);
-    this.autoPublishMaxPerRun = this.getPositiveNumberConfig('AUTO_PUBLISH_MAX_PER_RUN', 3);
+    this.telegramPublishingEnabled = this.getBooleanConfig('TELEGRAM_PUBLISHING_ENABLED', true);
+    this.autoPublishMaxPerRun = this.getPositiveNumberConfig('AUTO_PUBLISH_MAX_PER_RUN', 1);
     this.autoPublishFreshHours = this.getPositiveNumberConfig('AUTO_PUBLISH_FRESH_HOURS', 24);
     this.telegramDailyPublishLimit = this.getPositiveNumberConfig('TELEGRAM_DAILY_PUBLISH_LIMIT', 10);
   }
@@ -92,9 +94,14 @@ export class ArticlePublishingService {
     }
   }
 
-  async publishNewArticles(limit = 10): Promise<number> {
+  async publishNewArticles(limit?: number): Promise<number> {
     if (!this.autoPublishEnabled) {
       this.logger.warn('auto-publish skipped because AUTO_PUBLISH_ENABLED=false');
+      return 0;
+    }
+
+    if (!this.telegramPublishingEnabled) {
+      this.logger.warn('auto-publish skipped because TELEGRAM_PUBLISHING_ENABLED=false');
       return 0;
     }
 
@@ -103,18 +110,19 @@ export class ArticlePublishingService {
       return 0;
     }
 
+    const requestedLimit = typeof limit === 'number' && limit > 0 ? limit : this.autoPublishMaxPerRun;
     const { start, end } = getTashkentDayRange();
     const publishedToday = await this.articlesService.countPublishedBetween(start, end);
     const dailyRemaining = Math.max(0, this.telegramDailyPublishLimit - publishedToday);
     if (dailyRemaining === 0) {
       this.logger.log(
-        `auto-publish completed scanned=0 published=0 skippedOld=0 skippedDailyLimit=0 publishedToday=${publishedToday} dailyLimit=${this.telegramDailyPublishLimit} dailyLimitReached=true`,
+        `auto-publish completed scanned=0 published=0 skippedOld=0 skippedDailyLimit=0 publishedToday=${publishedToday} dailyLimit=${this.telegramDailyPublishLimit} maxPerRun=${this.autoPublishMaxPerRun} dailyLimitReached=true`,
       );
       return 0;
     }
 
-    const runLimit = Math.min(this.autoPublishMaxPerRun, dailyRemaining);
-    const scanLimit = Math.max(limit, runLimit * 3);
+    const runLimit = Math.min(requestedLimit, this.autoPublishMaxPerRun, dailyRemaining);
+    const scanLimit = Math.max(requestedLimit, runLimit * 3);
     const articles = await this.articlesService.findNewForPublishing(scanLimit);
     let publishedCount = 0;
     let skippedOld = 0;
@@ -126,7 +134,7 @@ export class ArticlePublishingService {
       if (publishedCount >= runLimit) {
         skippedDailyLimit = articles.length - index;
         this.logger.log(
-          `auto-publish max limit reached publishedToday=${publishedToday} dailyLimit=${this.telegramDailyPublishLimit} runLimit=${runLimit}`,
+          `auto-publish max limit reached publishedToday=${publishedToday} dailyLimit=${this.telegramDailyPublishLimit} maxPerRun=${this.autoPublishMaxPerRun} runLimit=${runLimit}`,
         );
         break;
       }
@@ -146,7 +154,7 @@ export class ArticlePublishingService {
     }
 
     this.logger.log(
-      `auto-publish completed scanned=${articles.length} published=${publishedCount} skippedOld=${skippedOld} skippedDailyLimit=${skippedDailyLimit} publishedToday=${publishedToday} dailyLimit=${this.telegramDailyPublishLimit} dailyLimitReached=${publishedToday + publishedCount >= this.telegramDailyPublishLimit}`,
+      `auto-publish completed scanned=${articles.length} published=${publishedCount} skippedOld=${skippedOld} skippedDailyLimit=${skippedDailyLimit} publishedToday=${publishedToday} dailyLimit=${this.telegramDailyPublishLimit} maxPerRun=${this.autoPublishMaxPerRun} dailyLimitReached=${publishedToday + publishedCount >= this.telegramDailyPublishLimit}`,
     );
     return publishedCount;
   }

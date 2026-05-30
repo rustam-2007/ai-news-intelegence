@@ -63,6 +63,7 @@ describe('ArticleProcessingService', () => {
             AI_MAX_INPUT_CHARS: 2500,
             AI_MAX_PARAGRAPHS: 4,
             AI_DAILY_PROCESS_LIMIT: 10,
+            AI_PROCESS_MAX_PER_RUN: 1,
             AI_PROCESS_FRESH_HOURS: 24,
             TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
           }),
@@ -268,6 +269,7 @@ describe('ArticleProcessingService', () => {
             AI_MAX_INPUT_CHARS: 160,
             AI_MAX_PARAGRAPHS: 4,
             AI_DAILY_PROCESS_LIMIT: 10,
+            AI_PROCESS_MAX_PER_RUN: 1,
             AI_PROCESS_FRESH_HOURS: 24,
             TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
           }),
@@ -348,11 +350,51 @@ describe('ArticleProcessingService', () => {
     expect(openAiService.processArticle).toHaveBeenCalledWith(expect.objectContaining({ articleId: 11 }));
   });
 
+  it('auto-processing processes max 1 per run by default', async () => {
+    const freshDate = new Date();
+    articlesService.findNewForProcessing.mockResolvedValue([
+      { id: 21, status: 'NEW', publishedAt: freshDate, createdAt: freshDate },
+      { id: 22, status: 'NEW', publishedAt: freshDate, createdAt: freshDate },
+    ]);
+    articlesService.findOne.mockImplementation(async (id: number) => ({
+      id,
+      title: `Title ${id}`,
+      content: 'A'.repeat(300),
+      excerpt: 'Fresh excerpt',
+      status: 'NEW',
+      publishedAt: freshDate,
+      createdAt: freshDate,
+    }));
+    openAiService.isConfigured.mockReturnValue(true);
+    openAiService.processArticle.mockResolvedValue({
+      rewrittenTitleUz: 'Yangi sarlavha',
+      summaryUz: 'Qisqa xulosa',
+      category: 'jamiyat',
+      rawResponse: '{"rewrittenTitleUz":"Yangi sarlavha","summaryUz":"Qisqa xulosa","category":"jamiyat"}',
+    });
+    articlesService.markProcessing.mockResolvedValue({});
+    articlesService.markApproved.mockResolvedValue({ id: 21, status: 'APPROVED' });
+
+    await expect(service.processNewArticles()).resolves.toBe(1);
+
+    expect(openAiService.processArticle).toHaveBeenCalledTimes(1);
+  });
+
   it('respects the daily AI process limit', async () => {
     articlesService.countProcessedBetween.mockResolvedValue(10);
     openAiService.isConfigured.mockReturnValue(true);
 
     await expect(service.processNewArticles(10)).resolves.toBe(0);
+
+    expect(articlesService.findNewForProcessing).not.toHaveBeenCalled();
+    expect(openAiService.processArticle).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-process when remaining Telegram daily capacity is 0', async () => {
+    articlesService.countPublishedBetween.mockResolvedValue(10);
+    openAiService.isConfigured.mockReturnValue(true);
+
+    await expect(service.processNewArticles()).resolves.toBe(0);
 
     expect(articlesService.findNewForProcessing).not.toHaveBeenCalled();
     expect(openAiService.processArticle).not.toHaveBeenCalled();

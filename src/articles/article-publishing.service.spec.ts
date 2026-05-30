@@ -49,7 +49,8 @@ describe('ArticlePublishingService', () => {
           provide: ConfigService,
           useValue: new ConfigService({
             AUTO_PUBLISH_ENABLED: true,
-            AUTO_PUBLISH_MAX_PER_RUN: 20,
+            TELEGRAM_PUBLISHING_ENABLED: true,
+            AUTO_PUBLISH_MAX_PER_RUN: 1,
             TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
             AUTO_PUBLISH_FRESH_HOURS: 24,
           }),
@@ -142,6 +143,47 @@ describe('ArticlePublishingService', () => {
     expect(telegramService.publishArticle).not.toHaveBeenCalled();
   });
 
+  it('auto-publish runs with max 1 per run by default', async () => {
+    const now = Date.now();
+    articlesService.findNewForPublishing.mockResolvedValue(
+      [1, 2, 3].map((id) => ({
+        id,
+        status: 'APPROVED',
+        publishedAt: new Date(now),
+        createdAt: new Date(now),
+        source: { name: 'Example' },
+      })),
+    );
+    articlesService.findOne.mockImplementation(async (id: number) => ({
+      id,
+      status: 'APPROVED',
+      telegramMessageId: null,
+    }));
+    articlesService.findOneForPublishing.mockImplementation(async (id: number) => ({
+      id,
+      title: `Title ${id}`,
+      url: `https://example.com/${id}`,
+      excerpt: 'Excerpt',
+      summaryUz: 'AI summary',
+      rewrittenTitleUz: 'AI title',
+      status: 'APPROVED',
+      telegramMessageId: null,
+      publishedAt: new Date(now),
+      createdAt: new Date(now),
+      source: { name: 'Example' },
+    }));
+    telegramService.publishArticle.mockResolvedValue('42');
+    articlesService.markPublished.mockImplementation(async (id: number) => ({
+      id,
+      status: 'PUBLISHED',
+      telegramMessageId: '42',
+    }));
+
+    await expect(service.publishNewArticles()).resolves.toBe(1);
+
+    expect(telegramService.publishArticle).toHaveBeenCalledTimes(1);
+  });
+
   it('selects newest approved articles first for auto-publish', async () => {
     const now = Date.now();
     articlesService.findNewForPublishing.mockResolvedValue(
@@ -178,12 +220,81 @@ describe('ArticlePublishingService', () => {
       telegramMessageId: '42',
     }));
 
-    await expect(service.publishNewArticles()).resolves.toBe(3);
+    await expect(service.publishNewArticles(3)).resolves.toBe(1);
 
-    expect(telegramService.publishArticle).toHaveBeenCalledTimes(3);
+    expect(telegramService.publishArticle).toHaveBeenCalledTimes(1);
     expect(articlesService.findOne).toHaveBeenNthCalledWith(1, 5);
-    expect(articlesService.findOne).toHaveBeenNthCalledWith(2, 4);
-    expect(articlesService.findOne).toHaveBeenNthCalledWith(3, 3);
+  });
+
+  it('if publishedToday is 9 and maxPerRun is 3, auto-publish publishes only 1', async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ArticlePublishingService,
+        {
+          provide: ConfigService,
+          useValue: new ConfigService({
+            AUTO_PUBLISH_ENABLED: true,
+            TELEGRAM_PUBLISHING_ENABLED: true,
+            AUTO_PUBLISH_MAX_PER_RUN: 3,
+            TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
+            AUTO_PUBLISH_FRESH_HOURS: 24,
+          }),
+        },
+        {
+          provide: ArticlesService,
+          useValue: articlesService,
+        },
+        {
+          provide: ArticleProcessingService,
+          useValue: articleProcessingService,
+        },
+        {
+          provide: TelegramService,
+          useValue: telegramService,
+        },
+      ],
+    }).compile();
+
+    const customService = module.get<ArticlePublishingService>(ArticlePublishingService);
+    const now = Date.now();
+    articlesService.countPublishedBetween.mockResolvedValue(9);
+    articlesService.findNewForPublishing.mockResolvedValue(
+      [1, 2, 3].map((id) => ({
+        id,
+        status: 'APPROVED',
+        publishedAt: new Date(now),
+        createdAt: new Date(now),
+        source: { name: 'Example' },
+      })),
+    );
+    articlesService.findOne.mockImplementation(async (id: number) => ({
+      id,
+      status: 'APPROVED',
+      telegramMessageId: null,
+    }));
+    articlesService.findOneForPublishing.mockImplementation(async (id: number) => ({
+      id,
+      title: `Title ${id}`,
+      url: `https://example.com/${id}`,
+      excerpt: 'Excerpt',
+      summaryUz: 'AI summary',
+      rewrittenTitleUz: 'AI title',
+      status: 'APPROVED',
+      telegramMessageId: null,
+      publishedAt: new Date(now),
+      createdAt: new Date(now),
+      source: { name: 'Example' },
+    }));
+    telegramService.publishArticle.mockResolvedValue('42');
+    articlesService.markPublished.mockImplementation(async (id: number) => ({
+      id,
+      status: 'PUBLISHED',
+      telegramMessageId: '42',
+    }));
+
+    await expect(customService.publishNewArticles(3)).resolves.toBe(1);
+
+    expect(telegramService.publishArticle).toHaveBeenCalledTimes(1);
   });
 
   it('allows manual publish for an old approved article even if daily limit is reached', async () => {

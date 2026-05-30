@@ -6,7 +6,8 @@ import { ArticleProcessingService } from './article-processing.service';
 export class ArticleProcessingScheduler {
   constructor(private readonly articleProcessingService: ArticleProcessingService) {}
 
-  @Cron('30 */5 * * * *', { timeZone: 'Asia/Tashkent' })
+  // Run once per hour at the top of the hour in Asia/Tashkent before auto-publish.
+  @Cron('0 0 * * * *', { timeZone: 'Asia/Tashkent' })
   async handleCron(): Promise<void> {
     await this.articleProcessingService.processNewArticles();
   }
