@@ -44,7 +44,7 @@ describe('facebook-crosspost n8n workflow', () => {
     expect(jsCode).toContain("return [{ json: { success: false, error: 'Missing facebook.message or facebook.link in payload' } }];");
   });
 
-  it('routes only validation failures to Respond Invalid', () => {
+  it('routes success false to Respond Invalid and success true to Post to Facebook Page', () => {
     const validationFailed = getNode('Validation Failed?');
     const conditions = validationFailed.parameters?.conditions as { boolean?: Array<Record<string, unknown>> };
 
@@ -77,7 +77,7 @@ describe('facebook-crosspost n8n workflow', () => {
     });
   });
 
-  it('returns backend-compatible response bodies', () => {
+  it('returns backend-compatible response bodies from the mapped Facebook response path', () => {
     const mapResponse = getNode('Map Facebook Response');
     const respondInvalid = getNode('Respond Invalid');
     const respondResult = getNode('Respond Result');
@@ -106,6 +106,11 @@ describe('facebook-crosspost n8n workflow', () => {
       index: 0,
     });
     expect(workflow.connections['Map Facebook Response'].main[0][0]).toEqual({
+      node: 'Respond Result',
+      type: 'main',
+      index: 0,
+    });
+    expect(workflow.connections['Validate Secret'].main[0][0]).not.toEqual({
       node: 'Respond Result',
       type: 'main',
       index: 0,
