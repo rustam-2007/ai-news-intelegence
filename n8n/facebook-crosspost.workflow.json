@@ -33,13 +33,27 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
             {
-              "value1": "={{$json.success === false}}",
-              "value2": true
+              "id": "validation-failed-condition",
+              "leftValue": "={{ $json.success === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
-          ]
-        }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
       "id": "If_Validation_Failed",
       "name": "Validation Failed?",
@@ -52,8 +66,7 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{$json}}",
+        "respondWith": "firstIncomingItem",
         "options": {
           "responseCode": 401
         }
@@ -116,8 +129,7 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{$json}}",
+        "respondWith": "firstIncomingItem",
         "options": {
           "responseCode": "={{$json.success ? 200 : 500}}"
         }

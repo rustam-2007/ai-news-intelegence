@@ -46,14 +46,37 @@ describe('facebook-crosspost n8n workflow', () => {
 
   it('routes success false to Respond Invalid and success true to Post to Facebook Page', () => {
     const validationFailed = getNode('Validation Failed?');
-    const conditions = validationFailed.parameters?.conditions as { boolean?: Array<Record<string, unknown>> };
+    const parameters = validationFailed.parameters as {
+      conditions?: {
+        options?: Record<string, unknown>;
+        conditions?: Array<Record<string, unknown>>;
+        combinator?: string;
+      };
+      options?: Record<string, unknown>;
+    };
 
-    expect(conditions?.boolean).toEqual([
-      {
-        value1: '={{$json.success === false}}',
-        value2: true,
+    expect(parameters.conditions).toEqual({
+      options: {
+        caseSensitive: true,
+        leftValue: '',
+        typeValidation: 'strict',
+        version: 2,
       },
-    ]);
+      conditions: [
+        {
+          id: 'validation-failed-condition',
+          leftValue: '={{ $json.success === false }}',
+          rightValue: '',
+          operator: {
+            type: 'boolean',
+            operation: 'true',
+            singleValue: true,
+          },
+        },
+      ],
+      combinator: 'and',
+    });
+    expect(parameters.options).toEqual({});
 
     expect(workflow.connections.Webhook.main[0][0]).toEqual({
       node: 'Validate Secret',
@@ -89,16 +112,16 @@ describe('facebook-crosspost n8n workflow', () => {
       "return [{ json: { success: false, error: String(errorMessage) } }];",
     );
     expect(respondInvalid.parameters).toMatchObject({
-      respondWith: 'json',
-      responseBody: '={{$json}}',
+      respondWith: 'firstIncomingItem',
       options: {
         responseCode: 401,
       },
     });
     expect(respondResult.parameters).toMatchObject({
-      respondWith: 'json',
-      responseBody: '={{$json}}',
+      respondWith: 'firstIncomingItem',
     });
+    expect(respondInvalid.parameters).not.toHaveProperty('responseBody');
+    expect(respondResult.parameters).not.toHaveProperty('responseBody');
 
     expect(workflow.connections['Post to Facebook Page'].main[0][0]).toEqual({
       node: 'Map Facebook Response',
