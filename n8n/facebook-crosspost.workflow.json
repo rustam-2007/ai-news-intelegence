@@ -19,7 +19,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const headers = $json.headers || {};\nconst body = $json.body || {};\nconst expectedSecret = $env.N8N_FACEBOOK_WEBHOOK_SECRET;\nconst actualSecret = headers['x-n8n-webhook-secret'] || headers['X-N8N-Webhook-Secret'];\n\nif (!expectedSecret) {\n  return [{ json: { success: false, error: 'N8N_FACEBOOK_WEBHOOK_SECRET is not configured' } }];\n}\n\nif (!actualSecret || actualSecret !== expectedSecret) {\n  return [{ json: { success: false, error: 'Invalid webhook secret' } }];\n}\n\nif (!body.facebook?.message || !body.facebook?.link) {\n  return [{ json: { success: false, error: 'Missing facebook.message or facebook.link in payload' } }];\n}\n\nreturn [{\n  json: {\n    payload: body,\n    graphUrl: `https://graph.facebook.com/${$env.FACEBOOK_API_VERSION}/${$env.FACEBOOK_PAGE_ID}/feed`,\n    message: body.facebook.message,\n    link: body.facebook.link,\n  },\n}];"
+        "jsCode": "const headers = $json.headers || {};\nconst body = $json.body ?? $json;\nconst expectedSecret = $env.N8N_FACEBOOK_WEBHOOK_SECRET;\nconst actualSecret = headers['x-n8n-webhook-secret'] || headers['X-N8N-Webhook-Secret'];\n\nif (!expectedSecret) {\n  return [{ json: { success: false, error: 'N8N_FACEBOOK_WEBHOOK_SECRET is not configured' } }];\n}\n\nif (!actualSecret || actualSecret !== expectedSecret) {\n  return [{ json: { success: false, error: 'Invalid webhook secret' } }];\n}\n\nif (!body || typeof body !== 'object' || Array.isArray(body)) {\n  return [{ json: { success: false, error: 'Webhook payload must be a JSON object' } }];\n}\n\nif (!body.facebook?.message || !body.facebook?.link) {\n  return [{ json: { success: false, error: 'Missing facebook.message or facebook.link in payload' } }];\n}\n\nreturn [{\n  json: {\n    success: true,\n    payload: body,\n    graphUrl: `https://graph.facebook.com/${$env.FACEBOOK_API_VERSION}/${$env.FACEBOOK_PAGE_ID}/feed`,\n    message: body.facebook.message,\n    link: body.facebook.link,\n  },\n}];"
       },
       "id": "Code_Validate",
       "name": "Validate Secret",
@@ -103,7 +103,7 @@
     },
     {
       "parameters": {
-        "jsCode": "if ($json.id) {\n  return [{ json: { success: true, facebookPostId: String($json.id), provider: 'facebook' } }];\n}\n\nconst errorMessage = $json.error?.message || $json.message || 'Facebook Page post failed';\nreturn [{ json: { success: false, error: String(errorMessage) } }];"
+        "jsCode": "if ($json.id) {\n  return [{ json: { success: true, facebookPostId: String($json.id) } }];\n}\n\nconst errorMessage = $json.error?.message || $json.message || 'Facebook Page post failed';\nreturn [{ json: { success: false, error: String(errorMessage) } }];"
       },
       "id": "Code_Map_Response",
       "name": "Map Facebook Response",
