@@ -8,6 +8,8 @@ describe('ArticlesService', () => {
       findMany: jest.Mock;
       findUnique: jest.Mock;
       count: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
     };
   };
 
@@ -17,6 +19,8 @@ describe('ArticlesService', () => {
         findMany: jest.fn(),
         findUnique: jest.fn(),
         count: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
       },
     };
 
@@ -35,6 +39,11 @@ describe('ArticlesService', () => {
         createdAt: new Date('2026-05-30T09:00:00.000Z'),
         processedAt: new Date('2026-05-30T09:30:00.000Z'),
         telegramMessageId: null,
+        facebookPostId: null,
+        facebookPostedAt: null,
+        facebookPostError: null,
+        facebookPostRetryCount: 0,
+        facebookCrosspostStatus: null,
         publishError: null,
       },
     ]);
@@ -53,6 +62,11 @@ describe('ArticlesService', () => {
           createdAt: true,
           processedAt: true,
           telegramMessageId: true,
+          facebookPostId: true,
+          facebookPostedAt: true,
+          facebookPostError: true,
+          facebookPostRetryCount: true,
+          facebookCrosspostStatus: true,
           publishError: true,
         },
       }),
@@ -116,5 +130,43 @@ describe('ArticlesService', () => {
         },
       },
     });
+  });
+
+  it('selects backfill candidates that are published to telegram but not yet posted to facebook', async () => {
+    prisma.article.findMany.mockResolvedValue([]);
+
+    await service.findFacebookBackfillCandidates(1);
+
+    expect(prisma.article.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: 'PUBLISHED',
+          telegramMessageId: {
+            not: null,
+          },
+          facebookPostId: null,
+          OR: [{ facebookCrosspostStatus: null }, { facebookCrosspostStatus: { not: 'POSTED' } }],
+        },
+        take: 1,
+      }),
+    );
+  });
+
+  it('limits retry candidates by facebook retry count', async () => {
+    prisma.article.findMany.mockResolvedValue([]);
+
+    await service.findFailedFacebookCrosspostCandidates(1, 3);
+
+    expect(prisma.article.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          facebookCrosspostStatus: 'FAILED',
+          facebookPostRetryCount: {
+            lt: 3,
+          },
+        }),
+        take: 1,
+      }),
+    );
   });
 });

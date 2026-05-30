@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ArticleProcessingService } from './article-processing.service';
 import { ArticlePublishingService } from './article-publishing.service';
 import { ArticlesService } from './articles.service';
+import { FacebookCrosspostService } from '../facebook-crosspost/facebook-crosspost.service';
 import { TelegramService } from '../telegram/telegram.service';
 
 describe('ArticlePublishingService', () => {
@@ -14,6 +15,13 @@ describe('ArticlePublishingService', () => {
     markFailed: jest.Mock;
     findNewForPublishing: jest.Mock;
     countPublishedBetween: jest.Mock;
+    markFacebookCrosspostPending: jest.Mock;
+    markFacebookCrossposted: jest.Mock;
+    markFacebookCrosspostFailed: jest.Mock;
+    markFacebookCrosspostSkipped: jest.Mock;
+    findFacebookBackfillCandidates: jest.Mock;
+    findFailedFacebookCrosspostCandidates: jest.Mock;
+    countFacebookPostedBetween: jest.Mock;
   };
   let articleProcessingService: {
     processArticle: jest.Mock;
@@ -21,6 +29,10 @@ describe('ArticlePublishingService', () => {
   let telegramService: {
     publishArticle: jest.Mock;
     isConfigured: jest.Mock;
+  };
+  let facebookCrosspostService: {
+    isEnabled: jest.Mock;
+    crosspostArticle: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -31,6 +43,13 @@ describe('ArticlePublishingService', () => {
       markFailed: jest.fn(),
       findNewForPublishing: jest.fn(),
       countPublishedBetween: jest.fn().mockResolvedValue(0),
+      markFacebookCrosspostPending: jest.fn(),
+      markFacebookCrossposted: jest.fn(),
+      markFacebookCrosspostFailed: jest.fn(),
+      markFacebookCrosspostSkipped: jest.fn(),
+      findFacebookBackfillCandidates: jest.fn(),
+      findFailedFacebookCrosspostCandidates: jest.fn(),
+      countFacebookPostedBetween: jest.fn().mockResolvedValue(0),
     };
 
     articleProcessingService = {
@@ -40,6 +59,14 @@ describe('ArticlePublishingService', () => {
     telegramService = {
       publishArticle: jest.fn(),
       isConfigured: jest.fn().mockReturnValue(true),
+    };
+
+    facebookCrosspostService = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      crosspostArticle: jest.fn().mockResolvedValue({
+        success: true,
+        facebookPostId: 'fb-42',
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -53,6 +80,12 @@ describe('ArticlePublishingService', () => {
             AUTO_PUBLISH_MAX_PER_RUN: 1,
             TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
             AUTO_PUBLISH_FRESH_HOURS: 24,
+            FACEBOOK_CROSSPOST_ENABLED: true,
+            FACEBOOK_BACKFILL_ENABLED: true,
+            FACEBOOK_BACKFILL_LIMIT: 1,
+            FACEBOOK_CROSSPOST_MAX_RETRY_COUNT: 3,
+            FACEBOOK_CROSSPOST_MAX_PER_RUN: 1,
+            FACEBOOK_CROSSPOST_DAILY_LIMIT: 10,
           }),
         },
         {
@@ -67,6 +100,10 @@ describe('ArticlePublishingService', () => {
           provide: TelegramService,
           useValue: telegramService,
         },
+        {
+          provide: FacebookCrosspostService,
+          useValue: facebookCrosspostService,
+        },
       ],
     }).compile();
 
@@ -74,15 +111,19 @@ describe('ArticlePublishingService', () => {
   });
 
   it('marks article as published on successful Telegram send', async () => {
-    articlesService.findOne.mockResolvedValue({ id: 1, status: 'APPROVED' });
+    articlesService.findOne
+      .mockResolvedValueOnce({ id: 1, status: 'APPROVED' })
+      .mockResolvedValueOnce({ id: 1, status: 'PUBLISHED', telegramMessageId: '42', facebookPostId: 'fb-42' });
     const article = {
       id: 1,
+      sourceId: 1,
       title: 'Test',
       url: 'https://example.com/article',
       excerpt: 'Excerpt',
       summaryUz: 'AI summary',
       rewrittenTitleUz: 'AI title',
       status: 'APPROVED',
+      telegramMessageId: '42',
       source: { name: 'Example' },
     };
     articlesService.findOneForPublishing.mockResolvedValue(article);
@@ -95,6 +136,8 @@ describe('ArticlePublishingService', () => {
     });
 
     expect(articlesService.markPublished).toHaveBeenCalledWith(1, '42');
+    expect(facebookCrosspostService.crosspostArticle).toHaveBeenCalledWith(article);
+    expect(articlesService.markFacebookCrossposted).toHaveBeenCalledWith(1, 'fb-42');
   });
 
   it('marks article as failed and increments retries on publish error', async () => {
@@ -115,6 +158,7 @@ describe('ArticlePublishingService', () => {
 
     await expect(service.publishArticle(2)).rejects.toThrow('telegram down');
     expect(articlesService.markFailed).toHaveBeenCalledWith(2, 'telegram down');
+    expect(facebookCrosspostService.crosspostArticle).not.toHaveBeenCalled();
   });
 
   it('skips old approved backlog articles during auto-publish', async () => {
@@ -182,6 +226,130 @@ describe('ArticlePublishingService', () => {
     await expect(service.publishNewArticles()).resolves.toBe(1);
 
     expect(telegramService.publishArticle).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores facebook failure without rolling back telegram success', async () => {
+    articlesService.findOne
+      .mockResolvedValueOnce({ id: 3, status: 'APPROVED' })
+      .mockResolvedValueOnce({
+        id: 3,
+        status: 'PUBLISHED',
+        telegramMessageId: '53',
+        facebookCrosspostStatus: 'FAILED',
+        facebookPostRetryCount: 1,
+      });
+    const article = {
+      id: 3,
+      sourceId: 1,
+      title: 'Test',
+      url: 'https://example.com/article',
+      excerpt: 'Excerpt',
+      summaryUz: 'AI summary',
+      rewrittenTitleUz: 'AI title',
+      status: 'APPROVED',
+      telegramMessageId: '53',
+      source: { name: 'Example' },
+    };
+    articlesService.findOneForPublishing.mockResolvedValue(article);
+    telegramService.publishArticle.mockResolvedValue('53');
+    articlesService.markPublished.mockResolvedValue({ id: 3, status: 'PUBLISHED', telegramMessageId: '53' });
+    facebookCrosspostService.crosspostArticle.mockResolvedValue({
+      success: false,
+      error: 'n8n unavailable',
+    });
+
+    await expect(service.publishArticle(3)).resolves.toMatchObject({
+      id: 3,
+      status: 'PUBLISHED',
+      telegramMessageId: '53',
+    });
+    expect(articlesService.markFacebookCrosspostFailed).toHaveBeenCalledWith(3, 'n8n unavailable');
+  });
+
+  it('does not call n8n again when facebook is already posted', async () => {
+    const article = {
+      id: 31,
+      status: 'PUBLISHED',
+      telegramMessageId: 'existing-telegram',
+      facebookPostId: 'existing-facebook',
+      facebookCrosspostStatus: 'POSTED',
+    };
+    articlesService.findOne.mockResolvedValueOnce(article).mockResolvedValueOnce(article);
+    articlesService.findOneForPublishing.mockResolvedValue({
+      ...article,
+      sourceId: 1,
+      title: 'Already posted',
+      url: 'https://example.com/already-posted',
+      excerpt: 'Excerpt',
+      summaryUz: 'Summary',
+      rewrittenTitleUz: 'AI title',
+      category: 'ai',
+      imageUrl: null,
+      publishedAt: new Date(),
+      processedAt: new Date(),
+      source: { name: 'Example' },
+    });
+
+    await expect(service.publishArticle(31)).resolves.toEqual(article);
+    expect(facebookCrosspostService.crosspostArticle).not.toHaveBeenCalled();
+  });
+
+  it('backfill respects FACEBOOK_BACKFILL_LIMIT=1', async () => {
+    articlesService.findFacebookBackfillCandidates.mockResolvedValue([
+      {
+        id: 100,
+        sourceId: 1,
+        title: 'A',
+        url: 'https://example.com/a',
+        excerpt: 'Excerpt',
+        summaryUz: 'Summary',
+        rewrittenTitleUz: 'Title A',
+        category: 'ai',
+        imageUrl: null,
+        publishedAt: new Date(),
+        processedAt: new Date(),
+        status: 'PUBLISHED',
+        telegramMessageId: 'tg-100',
+        facebookPostId: null,
+        facebookCrosspostStatus: null,
+        source: { name: 'Example' },
+      },
+      {
+        id: 101,
+        sourceId: 1,
+        title: 'B',
+        url: 'https://example.com/b',
+        excerpt: 'Excerpt',
+        summaryUz: 'Summary',
+        rewrittenTitleUz: 'Title B',
+        category: 'ai',
+        imageUrl: null,
+        publishedAt: new Date(),
+        processedAt: new Date(),
+        status: 'PUBLISHED',
+        telegramMessageId: 'tg-101',
+        facebookPostId: null,
+        facebookCrosspostStatus: null,
+        source: { name: 'Example' },
+      },
+    ]);
+
+    const result = await service.backfillFacebookCrossposts(1);
+
+    expect(result).toMatchObject({
+      scanned: 2,
+      posted: 1,
+      skippedDailyLimit: 1,
+    });
+    expect(facebookCrosspostService.crosspostArticle).toHaveBeenCalledTimes(1);
+  });
+
+  it('retry respects FACEBOOK_CROSSPOST_MAX_RETRY_COUNT', async () => {
+    articlesService.findFailedFacebookCrosspostCandidates.mockResolvedValue([]);
+
+    await service.retryFailedFacebookCrossposts();
+
+    expect(articlesService.findFailedFacebookCrosspostCandidates).toHaveBeenCalledWith(1, 3);
   });
 
   it('selects newest approved articles first for auto-publish', async () => {
@@ -252,6 +420,10 @@ describe('ArticlePublishingService', () => {
           provide: TelegramService,
           useValue: telegramService,
         },
+        {
+          provide: FacebookCrosspostService,
+          useValue: facebookCrosspostService,
+        },
       ],
     }).compile();
 
@@ -299,15 +471,23 @@ describe('ArticlePublishingService', () => {
 
   it('allows manual publish for an old approved article even if daily limit is reached', async () => {
     const oldDate = new Date(Date.now() - 30 * 60 * 60 * 1000);
-    articlesService.findOne.mockResolvedValue({
-      id: 20,
-      status: 'APPROVED',
-      telegramMessageId: null,
-      publishedAt: oldDate,
-      createdAt: oldDate,
-    });
+    articlesService.findOne
+      .mockResolvedValueOnce({
+        id: 20,
+        status: 'APPROVED',
+        telegramMessageId: null,
+        publishedAt: oldDate,
+        createdAt: oldDate,
+      })
+      .mockResolvedValueOnce({
+        id: 20,
+        status: 'PUBLISHED',
+        telegramMessageId: '88',
+        facebookPostId: 'fb-88',
+      });
     articlesService.findOneForPublishing.mockResolvedValue({
       id: 20,
+      sourceId: 1,
       title: 'Old article',
       url: 'https://example.com/old',
       excerpt: 'Excerpt',
@@ -330,10 +510,36 @@ describe('ArticlePublishingService', () => {
   });
 
   it('does not send a duplicate message when telegramMessageId already exists', async () => {
-    articlesService.findOne.mockResolvedValue({
+    articlesService.findOne
+      .mockResolvedValueOnce({
+        id: 30,
+        status: 'APPROVED',
+        telegramMessageId: 'existing-1',
+      })
+      .mockResolvedValueOnce({
+        id: 30,
+        status: 'PUBLISHED',
+        telegramMessageId: 'existing-1',
+        facebookPostId: 'fb-existing-1',
+        facebookCrosspostStatus: 'POSTED',
+      });
+    articlesService.findOneForPublishing.mockResolvedValue({
       id: 30,
-      status: 'APPROVED',
+      sourceId: 1,
+      title: 'Duplicate article',
+      url: 'https://example.com/duplicate',
+      excerpt: 'Excerpt',
+      summaryUz: 'AI summary',
+      rewrittenTitleUz: 'AI title',
+      category: 'ai',
+      imageUrl: null,
+      publishedAt: new Date(),
+      processedAt: new Date(),
+      status: 'PUBLISHED',
       telegramMessageId: 'existing-1',
+      facebookPostId: null,
+      facebookCrosspostStatus: null,
+      source: { name: 'Example' },
     });
     articlesService.markPublished.mockResolvedValue({
       id: 30,
@@ -349,6 +555,7 @@ describe('ArticlePublishingService', () => {
 
     expect(telegramService.publishArticle).not.toHaveBeenCalled();
     expect(articlesService.markPublished).toHaveBeenCalledWith(30, 'existing-1');
+    expect(facebookCrosspostService.crosspostArticle).toHaveBeenCalledTimes(1);
   });
 
   it('does not send again when the article is already published', async () => {
@@ -356,12 +563,29 @@ describe('ArticlePublishingService', () => {
       id: 40,
       status: 'PUBLISHED',
       telegramMessageId: 'existing-2',
+      facebookPostId: 'fb-existing-2',
+      facebookCrosspostStatus: 'POSTED',
     };
-    articlesService.findOne.mockResolvedValue(publishedArticle);
+    articlesService.findOne.mockResolvedValueOnce(publishedArticle).mockResolvedValueOnce(publishedArticle);
+    articlesService.findOneForPublishing.mockResolvedValue({
+      ...publishedArticle,
+      sourceId: 1,
+      title: 'Already published',
+      url: 'https://example.com/already-published',
+      excerpt: 'Excerpt',
+      summaryUz: 'Summary',
+      rewrittenTitleUz: 'AI title',
+      category: 'ai',
+      imageUrl: null,
+      publishedAt: new Date(),
+      processedAt: new Date(),
+      source: { name: 'Example' },
+    });
 
     await expect(service.publishArticle(40)).resolves.toEqual(publishedArticle);
 
     expect(telegramService.publishArticle).not.toHaveBeenCalled();
     expect(articlesService.markPublished).not.toHaveBeenCalled();
+    expect(facebookCrosspostService.crosspostArticle).not.toHaveBeenCalled();
   });
 });

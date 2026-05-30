@@ -10,11 +10,21 @@ describe('ArticlesController', () => {
     findAll: jest.Mock;
     findOne: jest.Mock;
   };
+  let articlePublishingService: {
+    publishArticle: jest.Mock;
+    backfillFacebookCrossposts: jest.Mock;
+    retryFailedFacebookCrossposts: jest.Mock;
+  };
 
   beforeEach(async () => {
     articlesService = {
       findAll: jest.fn(),
       findOne: jest.fn(),
+    };
+    articlePublishingService = {
+      publishArticle: jest.fn(),
+      backfillFacebookCrossposts: jest.fn(),
+      retryFailedFacebookCrossposts: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -33,9 +43,7 @@ describe('ArticlesController', () => {
         },
         {
           provide: ArticlePublishingService,
-          useValue: {
-            publishArticle: jest.fn(),
-          },
+          useValue: articlePublishingService,
         },
       ],
     }).compile();
@@ -55,5 +63,45 @@ describe('ArticlesController', () => {
 
     await expect(controller.findOne(3)).resolves.toEqual({ id: 3, content: 'Full content' });
     expect(articlesService.findOne).toHaveBeenCalledWith(3);
+  });
+
+  it('exposes the facebook backfill endpoint', async () => {
+    articlePublishingService.backfillFacebookCrossposts.mockResolvedValue({
+      scanned: 1,
+      posted: 1,
+      skippedAlreadyPosted: 0,
+      skippedDailyLimit: 0,
+      failed: 0,
+    });
+
+    await expect(controller.backfillFacebook(1)).resolves.toEqual({
+      success: true,
+      scanned: 1,
+      posted: 1,
+      skippedAlreadyPosted: 0,
+      skippedDailyLimit: 0,
+      failed: 0,
+    });
+    expect(articlePublishingService.backfillFacebookCrossposts).toHaveBeenCalledWith(1);
+  });
+
+  it('exposes the facebook retry endpoint', async () => {
+    articlePublishingService.retryFailedFacebookCrossposts.mockResolvedValue({
+      scanned: 1,
+      posted: 1,
+      skippedAlreadyPosted: 0,
+      skippedDailyLimit: 0,
+      failed: 0,
+    });
+
+    await expect(controller.retryFacebookCrosspost()).resolves.toEqual({
+      success: true,
+      scanned: 1,
+      posted: 1,
+      skippedAlreadyPosted: 0,
+      skippedDailyLimit: 0,
+      failed: 0,
+    });
+    expect(articlePublishingService.retryFailedFacebookCrossposts).toHaveBeenCalled();
   });
 });

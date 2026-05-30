@@ -43,6 +43,26 @@ export class ArticlesController {
     };
   }
 
+  @Post('backfill-facebook')
+  async backfillFacebook(@Query('limit', new DefaultValuePipe(1), ParseIntPipe) limit: number) {
+    const result = await this.articlePublishingService.backfillFacebookCrossposts(limit);
+
+    return {
+      success: true,
+      ...result,
+    };
+  }
+
+  @Post('retry-facebook-crosspost')
+  async retryFacebookCrosspost() {
+    const result = await this.articlePublishingService.retryFailedFacebookCrossposts();
+
+    return {
+      success: true,
+      ...result,
+    };
+  }
+
   @Post(':id/reprocess')
   async reprocess(@Param('id', ParseIntPipe) id: number) {
     const article = await this.articleProcessingService.reprocessArticle(id);
