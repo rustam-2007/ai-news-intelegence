@@ -11,6 +11,8 @@ describe('ArticleProcessingService', () => {
     findOne: jest.Mock;
     findNewForProcessing: jest.Mock;
     findFailedForReprocessing: jest.Mock;
+    countProcessedBetween: jest.Mock;
+    countPublishedBetween: jest.Mock;
     markProcessing: jest.Mock;
     markApproved: jest.Mock;
     markFailed: jest.Mock;
@@ -32,6 +34,8 @@ describe('ArticleProcessingService', () => {
       findOne: jest.fn(),
       findNewForProcessing: jest.fn(),
       findFailedForReprocessing: jest.fn(),
+      countProcessedBetween: jest.fn().mockResolvedValue(0),
+      countPublishedBetween: jest.fn().mockResolvedValue(0),
       markProcessing: jest.fn(),
       markApproved: jest.fn(),
       markFailed: jest.fn(),
@@ -57,7 +61,10 @@ describe('ArticleProcessingService', () => {
           provide: ConfigService,
           useValue: new ConfigService({
             AI_MAX_INPUT_CHARS: 2500,
-            AI_MAX_PARAGRAPHS: 6,
+            AI_MAX_PARAGRAPHS: 4,
+            AI_DAILY_PROCESS_LIMIT: 10,
+            AI_PROCESS_FRESH_HOURS: 24,
+            TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
           }),
         },
         {
@@ -244,8 +251,8 @@ describe('ArticleProcessingService', () => {
     const aiInput = openAiService.processArticle.mock.calls[0][0].content as string;
     expect(aiInput).toContain('Useful excerpt');
     expect(aiInput).toContain('Paragraph 1');
-    expect(aiInput).toContain('Paragraph 6');
-    expect(aiInput).not.toContain('Paragraph 7');
+    expect(aiInput).toContain('Paragraph 4');
+    expect(aiInput).not.toContain('Paragraph 5');
     expect(aiInput).not.toContain('this should be skipped completely');
     expect(aiInput).not.toContain('Telegram: follow us');
     expect(aiInput.length).toBeLessThanOrEqual(2500);
@@ -260,6 +267,9 @@ describe('ArticleProcessingService', () => {
           useValue: new ConfigService({
             AI_MAX_INPUT_CHARS: 160,
             AI_MAX_PARAGRAPHS: 4,
+            AI_DAILY_PROCESS_LIMIT: 10,
+            AI_PROCESS_FRESH_HOURS: 24,
+            TELEGRAM_DAILY_PUBLISH_LIMIT: 10,
           }),
         },
         {
@@ -304,5 +314,47 @@ describe('ArticleProcessingService', () => {
 
     const aiInput = openAiService.processArticle.mock.calls[0][0].content as string;
     expect(aiInput.length).toBeLessThanOrEqual(160);
+  });
+
+  it('does not auto-process old NEW backlog articles', async () => {
+    const oldDate = new Date(Date.now() - 30 * 60 * 60 * 1000);
+    const freshDate = new Date();
+    articlesService.findNewForProcessing.mockResolvedValue([
+      { id: 10, status: 'NEW', publishedAt: oldDate, createdAt: oldDate },
+      { id: 11, status: 'NEW', publishedAt: freshDate, createdAt: freshDate },
+    ]);
+    articlesService.findOne.mockResolvedValue({
+      id: 11,
+      title: 'Fresh title',
+      content: 'A'.repeat(300),
+      excerpt: 'Fresh excerpt',
+      status: 'NEW',
+      publishedAt: freshDate,
+      createdAt: freshDate,
+    });
+    openAiService.isConfigured.mockReturnValue(true);
+    openAiService.processArticle.mockResolvedValue({
+      rewrittenTitleUz: 'Yangi sarlavha',
+      summaryUz: 'Qisqa xulosa',
+      category: 'jamiyat',
+      rawResponse: '{"rewrittenTitleUz":"Yangi sarlavha","summaryUz":"Qisqa xulosa","category":"jamiyat"}',
+    });
+    articlesService.markProcessing.mockResolvedValue({});
+    articlesService.markApproved.mockResolvedValue({ id: 11, status: 'APPROVED' });
+
+    await expect(service.processNewArticles(10)).resolves.toBe(1);
+
+    expect(openAiService.processArticle).toHaveBeenCalledTimes(1);
+    expect(openAiService.processArticle).toHaveBeenCalledWith(expect.objectContaining({ articleId: 11 }));
+  });
+
+  it('respects the daily AI process limit', async () => {
+    articlesService.countProcessedBetween.mockResolvedValue(10);
+    openAiService.isConfigured.mockReturnValue(true);
+
+    await expect(service.processNewArticles(10)).resolves.toBe(0);
+
+    expect(articlesService.findNewForProcessing).not.toHaveBeenCalled();
+    expect(openAiService.processArticle).not.toHaveBeenCalled();
   });
 });

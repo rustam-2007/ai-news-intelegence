@@ -16,6 +16,11 @@ export class ArticlesController {
     return this.articlesService.findAll();
   }
 
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.articlesService.findOne(id);
+  }
+
   @Post('reprocess-failed')
   async reprocessFailed(@Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number) {
     const result = await this.articleProcessingService.reprocessFailedArticles(limit);

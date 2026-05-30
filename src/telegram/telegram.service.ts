@@ -37,6 +37,9 @@ interface TelegramResponseState {
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
+const TELEGRAM_CONCISE_TRIGGER = 1500;
+const TELEGRAM_CONCISE_MIN_LENGTH = 500;
+const TELEGRAM_CONCISE_MAX_LENGTH = 1000;
 
 @Injectable()
 export class TelegramService {
@@ -108,7 +111,7 @@ export class TelegramService {
 
   buildTelegramPayload(article: PublishableArticle): TelegramPayload {
     const title = this.escapeHtml(article.rewrittenTitleUz?.trim() || article.title);
-    const excerpt = this.escapeHtml(article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.');
+    const excerpt = this.escapeHtml(this.buildTelegramExcerpt(article));
     const sourceName = this.escapeHtml(article.source.name);
     const sourceLink = this.escapeHtml(article.url);
 
@@ -126,7 +129,7 @@ export class TelegramService {
 
   buildMarkdownPayload(article: PublishableArticle, limit = TELEGRAM_TEXT_LIMIT): TelegramPayload {
     const title = this.escapeMarkdownV2(article.rewrittenTitleUz?.trim() || article.title);
-    const excerpt = this.escapeMarkdownV2(article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.');
+    const excerpt = this.escapeMarkdownV2(this.buildTelegramExcerpt(article));
     const sourceName = this.escapeMarkdownV2(article.source.name);
     const sourceLink = this.escapeMarkdownV2(article.url);
 
@@ -145,7 +148,7 @@ export class TelegramService {
 
   buildPlainTextPayload(article: PublishableArticle): TelegramPayload {
     const title = this.escapePlainText(article.rewrittenTitleUz?.trim() || article.title);
-    const excerpt = this.escapePlainText(article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.');
+    const excerpt = this.escapePlainText(this.buildTelegramExcerpt(article));
     const sourceName = this.escapePlainText(article.source.name);
     let text = [title, '', excerpt, '', `Read on ${sourceName}: ${article.url}`].join('\n');
 
@@ -252,6 +255,67 @@ export class TelegramService {
     const allowedExcerptLength = Math.max(160, limit - reserve - 3);
     const trimmedExcerpt = `${excerpt.slice(0, allowedExcerptLength).trim()}...`;
     return [`<b>${title}</b>`, '', trimmedExcerpt, '', `<a href="${sourceLink}">Read on ${sourceName}</a>`].join('\n');
+  }
+
+  private buildTelegramExcerpt(article: PublishableArticle): string {
+    const baseText = article.summaryUz?.trim() || article.excerpt?.trim() || 'No excerpt available.';
+    return baseText.length > TELEGRAM_CONCISE_TRIGGER ? this.createConciseVersion(baseText) : baseText;
+  }
+
+  private createConciseVersion(text: string): string {
+    const normalized = text.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+    if (normalized.length <= TELEGRAM_CONCISE_MAX_LENGTH) {
+      return normalized;
+    }
+
+    const paragraphs = normalized
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+
+    const segments = paragraphs.flatMap((paragraph) => this.splitIntoSegments(paragraph));
+    let concise = '';
+
+    for (const segment of segments) {
+      const candidate = concise ? `${concise} ${segment}` : segment;
+      if (candidate.length > TELEGRAM_CONCISE_MAX_LENGTH) {
+        break;
+      }
+
+      concise = candidate;
+      if (concise.length >= TELEGRAM_CONCISE_MIN_LENGTH) {
+        return concise;
+      }
+    }
+
+    if (!concise) {
+      return this.trimToWordBoundary(normalized, TELEGRAM_CONCISE_MAX_LENGTH);
+    }
+
+    if (concise.length < TELEGRAM_CONCISE_MIN_LENGTH) {
+      return this.trimToWordBoundary(normalized, TELEGRAM_CONCISE_MAX_LENGTH);
+    }
+
+    return concise;
+  }
+
+  private splitIntoSegments(paragraph: string): string[] {
+    const segments = paragraph
+      .split(/(?<=[.!?])\s+/)
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    return segments.length ? segments : [paragraph];
+  }
+
+  private trimToWordBoundary(text: string, limit: number): string {
+    if (text.length <= limit) {
+      return text;
+    }
+
+    const slice = text.slice(0, limit + 1);
+    const lastSpace = slice.lastIndexOf(' ');
+    return (lastSpace >= 0 ? slice.slice(0, lastSpace) : slice.slice(0, limit)).trim();
   }
 
   private async sendMessage(payload: TelegramPayload): Promise<Response> {

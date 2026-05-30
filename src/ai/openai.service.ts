@@ -36,10 +36,12 @@ export class OpenAiService {
   private readonly logger = new Logger(OpenAiService.name);
   private readonly model: string;
   private readonly client: OpenAI | null;
+  private readonly maxOutputTokens: number;
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-5.4-mini';
+    this.maxOutputTokens = this.getPositiveNumberConfig('AI_MAX_OUTPUT_TOKENS', 500);
     this.client = apiKey ? new OpenAI({ apiKey }) : null;
   }
 
@@ -68,15 +70,34 @@ export class OpenAiService {
       throw new Error('OpenAI processing is not configured');
     }
 
+    const normalizedContent = this.normalizeArticleText(input.content);
+    const paragraphCount = this.countParagraphs(normalizedContent);
+
+    this.logger.log(
+      `sending ai request articleId=${input.articleId} inputChars=${normalizedContent.length} paragraphCount=${paragraphCount} maxOutputTokens=${this.maxOutputTokens}`,
+    );
+
     const response = await this.client.responses.create({
       model: this.model,
       reasoning: { effort: 'low' },
-      max_output_tokens: 220,
+      max_output_tokens: this.maxOutputTokens,
       input: [
         {
           role: 'developer',
-          content:
-            "You rewrite Uzbek news items. Return concise Uzbek only. Keep facts unchanged. SummaryUz must be at most 500 characters. Category must be one of: siyosat, iqtisod, jamiyat, sport, texnologiya, dunyo, madaniyat, boshqa.",
+          content: [
+            'You process Uzbek news items.',
+            'Return valid JSON only.',
+            'Keep the meaning unchanged.',
+            'Keep all facts, names, dates, numbers, and quotes unchanged.',
+            'Rewrite only enough to avoid direct copying in the title.',
+            'Produce a concise Uzbek summary, not a full article rewrite.',
+            'Do not add explanations.',
+            'Do not add background information.',
+            'Do not repeat the article verbatim.',
+            'summaryUz should keep only the most important facts and stay concise, ideally 500-1000 characters.',
+            'rewrittenTitleUz should be a light rewrite of the original title without changing meaning or facts.',
+            `Category must be one of: ${ALLOWED_CATEGORIES.join(', ')}.`,
+          ].join(' '),
         },
         {
           role: 'user',
@@ -85,7 +106,7 @@ export class OpenAiService {
             '',
             `Qisqa matn: ${input.excerpt ?? ''}`,
             '',
-            `Asosiy matn: ${input.content}`,
+            `Tanlangan maqola matni (${normalizedContent.length} belgi, ${paragraphCount} paragraf): ${normalizedContent}`,
           ].join('\n'),
         },
       ],
@@ -116,6 +137,10 @@ export class OpenAiService {
     });
 
     const rawResponse = response.output_text ?? '';
+    const outputTokens = typeof response.usage?.output_tokens === 'number' ? response.usage.output_tokens : 'unknown';
+    this.logger.log(
+      `received ai response articleId=${input.articleId} outputTokens=${outputTokens} maxOutputTokens=${this.maxOutputTokens}`,
+    );
 
     try {
       const parsed = this.parseProcessedContent(rawResponse);
@@ -195,6 +220,32 @@ export class OpenAiService {
     return normalized && ALLOWED_CATEGORIES.includes(normalized as (typeof ALLOWED_CATEGORIES)[number])
       ? normalized
       : null;
+  }
+
+  private normalizeArticleText(value: string): string {
+    return value
+      .replace(/\r\n/g, '\n')
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+  }
+
+  private countParagraphs(value: string): number {
+    const paragraphs = value
+      .replace(/\r\n/g, '\n')
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean);
+
+    return Math.max(1, paragraphs.length);
+  }
+
+  private getPositiveNumberConfig(key: string, fallback: number): number {
+    const value = this.configService.get<string | number>(key);
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 
   private extractJsonBlock(rawResponse: string): string {

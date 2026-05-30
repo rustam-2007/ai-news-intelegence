@@ -5,10 +5,14 @@ import { createHash } from 'crypto';
 import { OpenAiResponseParseError, OpenAiService } from '../ai/openai.service';
 import { ArticleContentExtractorService } from '../ingestion/article-content-extractor.service';
 import { ArticlesService } from './articles.service';
+import { getTashkentDayRange } from './tashkent-time.util';
 
 const MIN_ARTICLE_TEXT_LENGTH = 40;
 const DEFAULT_AI_MAX_INPUT_CHARS = 2500;
-const DEFAULT_AI_MAX_PARAGRAPHS = 6;
+const DEFAULT_AI_MAX_PARAGRAPHS = 4;
+const DEFAULT_AI_DAILY_PROCESS_LIMIT = 10;
+const DEFAULT_AI_PROCESS_FRESH_HOURS = 24;
+const DEFAULT_TELEGRAM_DAILY_PUBLISH_LIMIT = 10;
 const MIN_PARAGRAPH_LENGTH = 40;
 const NOISY_PARAGRAPH_PATTERNS = [
   /related news/iu,
@@ -33,6 +37,9 @@ export class ArticleProcessingService {
   private readonly logger = new Logger(ArticleProcessingService.name);
   private readonly maxInputChars: number;
   private readonly maxParagraphs: number;
+  private readonly aiDailyProcessLimit: number;
+  private readonly aiProcessFreshHours: number;
+  private readonly telegramDailyPublishLimit: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -43,6 +50,12 @@ export class ArticleProcessingService {
   ) {
     this.maxInputChars = this.getPositiveNumberConfig('AI_MAX_INPUT_CHARS', DEFAULT_AI_MAX_INPUT_CHARS);
     this.maxParagraphs = this.getPositiveNumberConfig('AI_MAX_PARAGRAPHS', DEFAULT_AI_MAX_PARAGRAPHS);
+    this.aiDailyProcessLimit = this.getPositiveNumberConfig('AI_DAILY_PROCESS_LIMIT', DEFAULT_AI_DAILY_PROCESS_LIMIT);
+    this.aiProcessFreshHours = this.getPositiveNumberConfig('AI_PROCESS_FRESH_HOURS', DEFAULT_AI_PROCESS_FRESH_HOURS);
+    this.telegramDailyPublishLimit = this.getPositiveNumberConfig(
+      'TELEGRAM_DAILY_PUBLISH_LIMIT',
+      DEFAULT_TELEGRAM_DAILY_PUBLISH_LIMIT,
+    );
   }
 
   async processArticle(articleId: number): Promise<Article> {
@@ -79,6 +92,9 @@ export class ArticleProcessingService {
     await this.articlesService.markProcessing(article.id);
 
     try {
+      this.logger.log(
+        `built ai input articleId=${article.id} inputChars=${processingInput.length} maxInputChars=${this.maxInputChars} maxParagraphs=${this.maxParagraphs}`,
+      );
       const processed = await this.openAiService.processArticle({
         articleId: article.id,
         title: article.title,
@@ -115,10 +131,40 @@ export class ArticleProcessingService {
       return 0;
     }
 
-    const articles = await this.articlesService.findNewForProcessing(limit);
-    let processedCount = 0;
+    const { start, end } = getTashkentDayRange();
+    const [processedToday, publishedToday] = await Promise.all([
+      this.articlesService.countProcessedBetween(start, end),
+      this.articlesService.countPublishedBetween(start, end),
+    ]);
+    const processRemaining = Math.max(0, this.aiDailyProcessLimit - processedToday);
+    const publishRemaining = Math.max(0, this.telegramDailyPublishLimit - publishedToday);
+    const runLimit = Math.min(limit, processRemaining, publishRemaining);
 
-    for (const article of articles) {
+    if (runLimit === 0) {
+      this.logger.log(
+        `auto-processing completed approved=0 scanned=0 processedToday=${processedToday} dailyProcessLimit=${this.aiDailyProcessLimit} skippedOld=0 skippedLimit=0`,
+      );
+      return 0;
+    }
+
+    const scanLimit = Math.max(limit, runLimit * 3);
+    const articles = await this.articlesService.findNewForProcessing(scanLimit);
+    let processedCount = 0;
+    let skippedOld = 0;
+    let skippedLimit = 0;
+
+    for (let index = 0; index < articles.length; index += 1) {
+      const article = articles[index];
+      if (processedCount >= runLimit) {
+        skippedLimit = articles.length - index;
+        break;
+      }
+
+      if (this.isOlderThanFreshWindow(article)) {
+        skippedOld += 1;
+        continue;
+      }
+
       try {
         const result = await this.processArticle(article.id);
         if (result.status === 'APPROVED') {
@@ -129,7 +175,9 @@ export class ArticleProcessingService {
       }
     }
 
-    this.logger.log(`auto-processing completed approved=${processedCount} scanned=${articles.length}`);
+    this.logger.log(
+      `auto-processing completed approved=${processedCount} scanned=${articles.length} processedToday=${processedToday} dailyProcessLimit=${this.aiDailyProcessLimit} skippedOld=${skippedOld} skippedLimit=${skippedLimit}`,
+    );
     return processedCount;
   }
 
@@ -298,5 +346,11 @@ export class ArticleProcessingService {
     const value = this.configService.get<string | number>(key);
     const parsed = Number(value);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  }
+
+  private isOlderThanFreshWindow(article: Pick<Article, 'publishedAt' | 'createdAt'>): boolean {
+    const referenceDate = article.publishedAt ?? article.createdAt;
+    const cutoff = Date.now() - this.aiProcessFreshHours * 60 * 60 * 1000;
+    return referenceDate.getTime() < cutoff;
   }
 }

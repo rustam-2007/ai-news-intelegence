@@ -2,12 +2,30 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Article, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 
+const ARTICLE_LIST_SELECT = {
+  id: true,
+  sourceId: true,
+  title: true,
+  status: true,
+  category: true,
+  publishedAt: true,
+  createdAt: true,
+  processedAt: true,
+  telegramMessageId: true,
+  publishError: true,
+} satisfies Prisma.ArticleSelect;
+
+export type ArticleListItem = Prisma.ArticleGetPayload<{
+  select: typeof ARTICLE_LIST_SELECT;
+}>;
+
 @Injectable()
 export class ArticlesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<Article[]> {
+  async findAll(): Promise<ArticleListItem[]> {
     return this.prisma.article.findMany({
+      select: ARTICLE_LIST_SELECT,
       orderBy: [
         { publishedAt: 'desc' },
         { createdAt: 'desc' },
@@ -129,6 +147,7 @@ export class ArticlesService {
       where: {
         status: 'APPROVED',
         ingestedViaLatestOnly: true,
+        telegramMessageId: null,
       },
       include: {
         source: {
@@ -137,9 +156,7 @@ export class ArticlesService {
           },
         },
       },
-      orderBy: {
-        createdAt: 'asc',
-      },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: limit,
     });
   }
@@ -150,10 +167,34 @@ export class ArticlesService {
         status: 'NEW',
         ingestedViaLatestOnly: true,
       },
-      orderBy: {
-        createdAt: 'asc',
-      },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: limit,
+    });
+  }
+
+  async countPublishedBetween(start: Date, end: Date): Promise<number> {
+    return this.prisma.article.count({
+      where: {
+        status: 'PUBLISHED',
+        telegramMessageId: {
+          not: null,
+        },
+        updatedAt: {
+          gte: start,
+          lt: end,
+        },
+      },
+    });
+  }
+
+  async countProcessedBetween(start: Date, end: Date): Promise<number> {
+    return this.prisma.article.count({
+      where: {
+        processedAt: {
+          gte: start,
+          lt: end,
+        },
+      },
     });
   }
 
