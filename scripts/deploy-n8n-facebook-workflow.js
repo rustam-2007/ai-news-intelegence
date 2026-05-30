@@ -22,9 +22,11 @@ async function main() {
 
   const workflow = loadWorkflow(workflowPath);
   validateWorkflow(workflow, workflowPath);
+  const sanitizedWorkflow = sanitizeWorkflowForApi(workflow);
 
   if (dryRun) {
     console.log(`Dry run enabled. Workflow file is valid: ${workflowPath}`);
+    console.log(`Payload keys: ${Object.keys(sanitizedWorkflow).join(',')}`);
     console.log(`Would inspect ${baseUrl}/api/v1/workflows for workflow name "${workflow.name}".`);
     console.log(`Would create or update the workflow, then activate=${activateWorkflow}.`);
     return;
@@ -39,7 +41,7 @@ async function main() {
 
   if (existingWorkflow) {
     console.log(`Found existing workflow "${workflow.name}" with id=${existingWorkflow.id}. Updating.`);
-    await updateWorkflow(client, existingWorkflow.id, workflow);
+    await updateWorkflow(client, existingWorkflow.id, sanitizedWorkflow);
     console.log(`Updated workflow id=${existingWorkflow.id}.`);
 
     if (activateWorkflow) {
@@ -51,7 +53,7 @@ async function main() {
   }
 
   console.log(`Workflow "${workflow.name}" does not exist yet. Creating.`);
-  const createdWorkflow = await createWorkflow(client, workflow);
+  const createdWorkflow = await createWorkflow(client, sanitizedWorkflow);
   console.log(`Created workflow id=${createdWorkflow.id}.`);
 
   if (activateWorkflow) {
@@ -118,7 +120,6 @@ function sanitizeWorkflowForApi(workflow) {
     settings: workflow.settings || {},
     pinData: workflow.pinData || {},
     staticData: workflow.staticData || null,
-    meta: workflow.meta || {},
   };
 }
 
@@ -166,7 +167,7 @@ async function findWorkflowByName(client, workflowName) {
 }
 
 async function createWorkflow(client, workflow) {
-  const response = await client.request('POST', '/api/v1/workflows', sanitizeWorkflowForApi(workflow));
+  const response = await client.request('POST', '/api/v1/workflows', workflow);
   if (!response || typeof response.id !== 'string') {
     throw new Error('n8n API create workflow response did not include an id.');
   }
@@ -174,7 +175,7 @@ async function createWorkflow(client, workflow) {
 }
 
 async function updateWorkflow(client, workflowId, workflow) {
-  const response = await client.request('PUT', `/api/v1/workflows/${workflowId}`, sanitizeWorkflowForApi(workflow));
+  const response = await client.request('PUT', `/api/v1/workflows/${workflowId}`, workflow);
   if (!response || typeof response.id !== 'string') {
     throw new Error('n8n API update workflow response did not include an id.');
   }
