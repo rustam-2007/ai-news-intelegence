@@ -44,6 +44,11 @@ describe('ArticlesService', () => {
         facebookPostError: null,
         facebookPostRetryCount: 0,
         facebookCrosspostStatus: null,
+        instagramPostId: null,
+        instagramPostedAt: null,
+        instagramPostError: null,
+        instagramPostRetryCount: 0,
+        instagramCrosspostStatus: null,
         publishError: null,
       },
     ]);
@@ -67,6 +72,11 @@ describe('ArticlesService', () => {
           facebookPostError: true,
           facebookPostRetryCount: true,
           facebookCrosspostStatus: true,
+          instagramPostId: true,
+          instagramPostedAt: true,
+          instagramPostError: true,
+          instagramPostRetryCount: true,
+          instagramCrosspostStatus: true,
           publishError: true,
         },
       }),
@@ -162,6 +172,44 @@ describe('ArticlesService', () => {
         where: expect.objectContaining({
           facebookCrosspostStatus: 'FAILED',
           facebookPostRetryCount: {
+            lt: 3,
+          },
+        }),
+        take: 1,
+      }),
+    );
+  });
+
+  it('selects backfill candidates that are published to telegram but not yet posted to instagram', async () => {
+    prisma.article.findMany.mockResolvedValue([]);
+
+    await service.findInstagramBackfillCandidates(1);
+
+    expect(prisma.article.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: 'PUBLISHED',
+          telegramMessageId: {
+            not: null,
+          },
+          instagramPostId: null,
+          OR: [{ instagramCrosspostStatus: null }, { instagramCrosspostStatus: { not: 'POSTED' } }],
+        },
+        take: 1,
+      }),
+    );
+  });
+
+  it('limits retry candidates by instagram retry count', async () => {
+    prisma.article.findMany.mockResolvedValue([]);
+
+    await service.findFailedInstagramCrosspostCandidates(1, 3);
+
+    expect(prisma.article.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          instagramCrosspostStatus: 'FAILED',
+          instagramPostRetryCount: {
             lt: 3,
           },
         }),

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OpenAiService } from '../ai/openai.service';
 import { ArticlesService } from '../articles/articles.service';
-import { FacebookCrosspostService } from '../facebook-crosspost/facebook-crosspost.service';
+import { InstagramCrosspostService } from '../instagram-crosspost/instagram-crosspost.service';
 import { SourcesService } from '../sources/sources.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { DebugController } from './debug.controller';
@@ -24,18 +24,18 @@ describe('DebugController', () => {
           useValue: {
             getStatusCounts: jest.fn().mockResolvedValue([]),
             findLatestPublishAttempt: jest.fn().mockResolvedValue(null),
-            findLatestFacebookAttempt: jest.fn().mockResolvedValue({
+            findLatestInstagramAttempt: jest.fn().mockResolvedValue({
               id: 12,
               title: 'AI News',
-              facebookCrosspostStatus: 'POSTED',
-              facebookPostId: 'fb_12',
-              facebookPostError: null,
-              facebookPostedAt: new Date('2026-05-30T12:00:00.000Z'),
+              instagramCrosspostStatus: 'POSTED',
+              instagramPostId: 'ig_12',
+              instagramPostError: null,
+              instagramPostedAt: new Date('2026-05-30T12:00:00.000Z'),
             }),
-            getFacebookCounts: jest.fn().mockResolvedValue({
+            getInstagramCounts: jest.fn().mockResolvedValue({
               telegramPublishedOnly: 2,
-              facebookPosted: 8,
-              facebookFailed: 1,
+              instagramPosted: 8,
+              instagramFailed: 1,
             }),
           },
         },
@@ -49,7 +49,7 @@ describe('DebugController', () => {
           },
         },
         {
-          provide: FacebookCrosspostService,
+          provide: InstagramCrosspostService,
           useValue: {
             getConfigStatus: jest.fn().mockReturnValue({
               crosspostEnabled: true,
@@ -73,10 +73,10 @@ describe('DebugController', () => {
     controller = module.get<DebugController>(DebugController);
   });
 
-  it('includes facebook status without exposing secrets', async () => {
+  it('includes instagram status without exposing secrets', async () => {
     const result = await controller.getPipelineStatus();
 
-    expect(result.facebook).toEqual({
+    expect(result.instagram).toEqual({
       crosspostEnabled: true,
       provider: 'n8n',
       webhookConfigured: true,
@@ -84,17 +84,17 @@ describe('DebugController', () => {
         articleId: 12,
         title: 'AI News',
         status: 'POSTED',
-        facebookPostId: 'fb_12',
-        facebookPostError: null,
-        facebookPostedAt: new Date('2026-05-30T12:00:00.000Z'),
+        instagramPostId: 'ig_12',
+        instagramPostError: null,
+        instagramPostedAt: new Date('2026-05-30T12:00:00.000Z'),
       },
       counts: {
         telegramPublishedOnly: 2,
-        facebookPosted: 8,
-        facebookFailed: 1,
+        instagramPosted: 8,
+        instagramFailed: 1,
       },
     });
-    expect(JSON.stringify(result)).not.toContain('N8N_FACEBOOK_WEBHOOK_SECRET');
-    expect(JSON.stringify(result)).not.toContain('FACEBOOK_PAGE_ACCESS_TOKEN');
+    expect(JSON.stringify(result)).not.toContain('N8N_INSTAGRAM_WEBHOOK_SECRET');
+    expect(JSON.stringify(result)).not.toContain('INSTAGRAM_ACCESS_TOKEN');
   });
 });

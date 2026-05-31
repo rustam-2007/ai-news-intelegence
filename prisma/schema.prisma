@@ -53,6 +53,11 @@ model Article {
   facebookPostError String?       @db.Text @map("facebook_post_error")
   facebookPostRetryCount Int      @default(0) @map("facebook_post_retry_count")
   facebookCrosspostStatus FacebookCrosspostStatus? @map("facebook_crosspost_status")
+  instagramPostId    String?       @db.VarChar(255) @map("instagram_post_id")
+  instagramPostedAt  DateTime?     @map("instagram_posted_at")
+  instagramPostError String?       @db.Text @map("instagram_post_error")
+  instagramPostRetryCount Int      @default(0) @map("instagram_post_retry_count")
+  instagramCrosspostStatus InstagramCrosspostStatus? @map("instagram_crosspost_status")
   publishError      String?       @db.Text @map("publish_error")
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
@@ -64,6 +69,8 @@ model Article {
   @@index([createdAt(sort: Desc)])
   @@index([facebookCrosspostStatus])
   @@index([facebookPostedAt(sort: Desc)])
+  @@index([instagramCrosspostStatus])
+  @@index([instagramPostedAt(sort: Desc)])
   @@map("articles")
 }
 
@@ -76,6 +83,13 @@ enum ArticleStatus {
 }
 
 enum FacebookCrosspostStatus {
+  PENDING
+  POSTED
+  FAILED
+  SKIPPED
+}
+
+enum InstagramCrosspostStatus {
   PENDING
   POSTED
   FAILED

@@ -43,9 +43,9 @@ export class ArticlesController {
     };
   }
 
-  @Post('backfill-facebook')
-  async backfillFacebook(@Query('limit', new DefaultValuePipe(1), ParseIntPipe) limit: number) {
-    const result = await this.articlePublishingService.backfillFacebookCrossposts(limit);
+  @Post('backfill-instagram')
+  async backfillInstagram(@Query('limit', new DefaultValuePipe(1), ParseIntPipe) limit: number) {
+    const result = await this.articlePublishingService.backfillInstagramCrossposts(limit);
 
     return {
       success: true,
@@ -53,9 +53,9 @@ export class ArticlesController {
     };
   }
 
-  @Post('retry-facebook-crosspost')
-  async retryFacebookCrosspost() {
-    const result = await this.articlePublishingService.retryFailedFacebookCrossposts();
+  @Post('retry-instagram-crosspost')
+  async retryInstagramCrosspost(@Query('limit', new DefaultValuePipe(1), ParseIntPipe) limit: number) {
+    const result = await this.articlePublishingService.retryFailedInstagramCrossposts(limit);
 
     return {
       success: true,

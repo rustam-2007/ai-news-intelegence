@@ -12,8 +12,8 @@ describe('ArticlesController', () => {
   };
   let articlePublishingService: {
     publishArticle: jest.Mock;
-    backfillFacebookCrossposts: jest.Mock;
-    retryFailedFacebookCrossposts: jest.Mock;
+    backfillInstagramCrossposts: jest.Mock;
+    retryFailedInstagramCrossposts: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -23,8 +23,8 @@ describe('ArticlesController', () => {
     };
     articlePublishingService = {
       publishArticle: jest.fn(),
-      backfillFacebookCrossposts: jest.fn(),
-      retryFailedFacebookCrossposts: jest.fn(),
+      backfillInstagramCrossposts: jest.fn(),
+      retryFailedInstagramCrossposts: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -65,8 +65,8 @@ describe('ArticlesController', () => {
     expect(articlesService.findOne).toHaveBeenCalledWith(3);
   });
 
-  it('exposes the facebook backfill endpoint', async () => {
-    articlePublishingService.backfillFacebookCrossposts.mockResolvedValue({
+  it('exposes the instagram backfill endpoint', async () => {
+    articlePublishingService.backfillInstagramCrossposts.mockResolvedValue({
       scanned: 1,
       posted: 1,
       skippedAlreadyPosted: 0,
@@ -74,7 +74,7 @@ describe('ArticlesController', () => {
       failed: 0,
     });
 
-    await expect(controller.backfillFacebook(1)).resolves.toEqual({
+    await expect(controller.backfillInstagram(1)).resolves.toEqual({
       success: true,
       scanned: 1,
       posted: 1,
@@ -82,11 +82,11 @@ describe('ArticlesController', () => {
       skippedDailyLimit: 0,
       failed: 0,
     });
-    expect(articlePublishingService.backfillFacebookCrossposts).toHaveBeenCalledWith(1);
+    expect(articlePublishingService.backfillInstagramCrossposts).toHaveBeenCalledWith(1);
   });
 
-  it('exposes the facebook retry endpoint', async () => {
-    articlePublishingService.retryFailedFacebookCrossposts.mockResolvedValue({
+  it('exposes the instagram retry endpoint', async () => {
+    articlePublishingService.retryFailedInstagramCrossposts.mockResolvedValue({
       scanned: 1,
       posted: 1,
       skippedAlreadyPosted: 0,
@@ -94,7 +94,7 @@ describe('ArticlesController', () => {
       failed: 0,
     });
 
-    await expect(controller.retryFacebookCrosspost()).resolves.toEqual({
+    await expect(controller.retryInstagramCrosspost(1)).resolves.toEqual({
       success: true,
       scanned: 1,
       posted: 1,
@@ -102,6 +102,6 @@ describe('ArticlesController', () => {
       skippedDailyLimit: 0,
       failed: 0,
     });
-    expect(articlePublishingService.retryFailedFacebookCrossposts).toHaveBeenCalled();
+    expect(articlePublishingService.retryFailedInstagramCrossposts).toHaveBeenCalledWith(1);
   });
 });

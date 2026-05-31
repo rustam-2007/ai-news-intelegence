@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { OpenAiService } from '../ai/openai.service';
 import { ArticlesService } from '../articles/articles.service';
-import { FacebookCrosspostService } from '../facebook-crosspost/facebook-crosspost.service';
+import { InstagramCrosspostService } from '../instagram-crosspost/instagram-crosspost.service';
 import { SourcesService } from '../sources/sources.service';
 import { TelegramService } from '../telegram/telegram.service';
 
@@ -11,18 +11,18 @@ export class DebugController {
     private readonly sourcesService: SourcesService,
     private readonly articlesService: ArticlesService,
     private readonly telegramService: TelegramService,
-    private readonly facebookCrosspostService: FacebookCrosspostService,
+    private readonly instagramCrosspostService: InstagramCrosspostService,
     private readonly openAiService: OpenAiService,
   ) {}
 
   @Get('pipeline')
   async getPipelineStatus() {
-    const [sources, articleStatusCounts, latestPublishAttempt, latestFacebookAttempt, facebookCounts] = await Promise.all([
+    const [sources, articleStatusCounts, latestPublishAttempt, latestInstagramAttempt, instagramCounts] = await Promise.all([
       this.sourcesService.findAllWithLatestArticle(),
       this.articlesService.getStatusCounts(),
       this.articlesService.findLatestPublishAttempt(),
-      this.articlesService.findLatestFacebookAttempt(),
-      this.articlesService.getFacebookCounts(),
+      this.articlesService.findLatestInstagramAttempt(),
+      this.articlesService.getInstagramCounts(),
     ]);
 
     return {
@@ -33,19 +33,19 @@ export class DebugController {
         ...this.openAiService.getConfigStatus(),
         telegram: this.telegramService.getConfigStatus(),
       },
-      facebook: {
-        ...this.facebookCrosspostService.getConfigStatus(),
-        latestAttempt: latestFacebookAttempt
+      instagram: {
+        ...this.instagramCrosspostService.getConfigStatus(),
+        latestAttempt: latestInstagramAttempt
           ? {
-              articleId: latestFacebookAttempt.id,
-              title: latestFacebookAttempt.title,
-              status: latestFacebookAttempt.facebookCrosspostStatus,
-              facebookPostId: latestFacebookAttempt.facebookPostId,
-              facebookPostError: latestFacebookAttempt.facebookPostError,
-              facebookPostedAt: latestFacebookAttempt.facebookPostedAt,
+              articleId: latestInstagramAttempt.id,
+              title: latestInstagramAttempt.title,
+              status: latestInstagramAttempt.instagramCrosspostStatus,
+              instagramPostId: latestInstagramAttempt.instagramPostId,
+              instagramPostError: latestInstagramAttempt.instagramPostError,
+              instagramPostedAt: latestInstagramAttempt.instagramPostedAt,
             }
           : null,
-        counts: facebookCounts,
+        counts: instagramCounts,
       },
       sources: sources.map((source) => ({
         id: source.id,

@@ -17,6 +17,11 @@ const ARTICLE_LIST_SELECT = {
   facebookPostError: true,
   facebookPostRetryCount: true,
   facebookCrosspostStatus: true,
+  instagramPostId: true,
+  instagramPostedAt: true,
+  instagramPostError: true,
+  instagramPostRetryCount: true,
+  instagramCrosspostStatus: true,
   publishError: true,
 } satisfies Prisma.ArticleSelect;
 
@@ -126,6 +131,31 @@ export class ArticlesService {
     });
   }
 
+  async findLatestInstagramAttempt() {
+    return this.prisma.article.findFirst({
+      where: {
+        OR: [
+          { instagramPostId: { not: null } },
+          { instagramPostedAt: { not: null } },
+          { instagramPostError: { not: null } },
+          { instagramPostRetryCount: { gt: 0 } },
+          { instagramCrosspostStatus: { not: null } },
+        ],
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+      select: {
+        id: true,
+        title: true,
+        instagramPostId: true,
+        instagramPostError: true,
+        instagramPostedAt: true,
+        instagramCrosspostStatus: true,
+      },
+    });
+  }
+
   async findOne(id: number): Promise<Article> {
     const article = await this.prisma.article.findUnique({
       where: { id },
@@ -222,6 +252,18 @@ export class ArticlesService {
       where: {
         facebookCrosspostStatus: 'POSTED',
         facebookPostedAt: {
+          gte: start,
+          lt: end,
+        },
+      },
+    });
+  }
+
+  async countInstagramPostedBetween(start: Date, end: Date): Promise<number> {
+    return this.prisma.article.count({
+      where: {
+        instagramCrosspostStatus: 'POSTED',
+        instagramPostedAt: {
           gte: start,
           lt: end,
         },
@@ -349,6 +391,51 @@ export class ArticlesService {
     });
   }
 
+  async markInstagramCrosspostPending(id: number): Promise<Article> {
+    return this.prisma.article.update({
+      where: { id },
+      data: {
+        instagramCrosspostStatus: 'PENDING',
+        instagramPostError: null,
+      },
+    });
+  }
+
+  async markInstagramCrossposted(id: number, instagramPostId?: string): Promise<Article> {
+    return this.prisma.article.update({
+      where: { id },
+      data: {
+        instagramCrosspostStatus: 'POSTED',
+        instagramPostId: instagramPostId ?? null,
+        instagramPostedAt: new Date(),
+        instagramPostError: null,
+      },
+    });
+  }
+
+  async markInstagramCrosspostFailed(id: number, errorMessage: string): Promise<Article> {
+    return this.prisma.article.update({
+      where: { id },
+      data: {
+        instagramCrosspostStatus: 'FAILED',
+        instagramPostError: errorMessage,
+        instagramPostRetryCount: {
+          increment: 1,
+        },
+      },
+    });
+  }
+
+  async markInstagramCrosspostSkipped(id: number, errorMessage: string): Promise<Article> {
+    return this.prisma.article.update({
+      where: { id },
+      data: {
+        instagramCrosspostStatus: 'SKIPPED',
+        instagramPostError: errorMessage,
+      },
+    });
+  }
+
   async markFailed(id: number, errorMessage: string, options?: { aiRawResponse?: string | null }): Promise<Article> {
     const data: Prisma.ArticleUpdateInput = {
       status: 'FAILED',
@@ -459,6 +546,53 @@ export class ArticlesService {
     });
   }
 
+  async findInstagramBackfillCandidates(limit = 1) {
+    return this.prisma.article.findMany({
+      where: {
+        status: 'PUBLISHED',
+        telegramMessageId: {
+          not: null,
+        },
+        instagramPostId: null,
+        OR: [{ instagramCrosspostStatus: null }, { instagramCrosspostStatus: { not: 'POSTED' } }],
+      },
+      include: {
+        source: {
+          select: {
+            name: true,
+          },
+        },
+      },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+    });
+  }
+
+  async findFailedInstagramCrosspostCandidates(limit = 1, maxRetryCount = 3) {
+    return this.prisma.article.findMany({
+      where: {
+        status: 'PUBLISHED',
+        telegramMessageId: {
+          not: null,
+        },
+        instagramPostId: null,
+        instagramCrosspostStatus: 'FAILED',
+        instagramPostRetryCount: {
+          lt: maxRetryCount,
+        },
+      },
+      include: {
+        source: {
+          select: {
+            name: true,
+          },
+        },
+      },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+    });
+  }
+
   async getFacebookCounts(): Promise<{
     telegramPublishedOnly: number;
     facebookPosted: number;
@@ -491,6 +625,41 @@ export class ArticlesService {
       telegramPublishedOnly,
       facebookPosted,
       facebookFailed,
+    };
+  }
+
+  async getInstagramCounts(): Promise<{
+    telegramPublishedOnly: number;
+    instagramPosted: number;
+    instagramFailed: number;
+  }> {
+    const [telegramPublishedOnly, instagramPosted, instagramFailed] = await Promise.all([
+      this.prisma.article.count({
+        where: {
+          status: 'PUBLISHED',
+          telegramMessageId: {
+            not: null,
+          },
+          instagramPostId: null,
+          OR: [{ instagramCrosspostStatus: null }, { instagramCrosspostStatus: { not: 'POSTED' } }],
+        },
+      }),
+      this.prisma.article.count({
+        where: {
+          instagramCrosspostStatus: 'POSTED',
+        },
+      }),
+      this.prisma.article.count({
+        where: {
+          instagramCrosspostStatus: 'FAILED',
+        },
+      }),
+    ]);
+
+    return {
+      telegramPublishedOnly,
+      instagramPosted,
+      instagramFailed,
     };
   }
 }

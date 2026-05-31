@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Article } from '@prisma/client';
-import { FacebookCrosspostService } from '../facebook-crosspost/facebook-crosspost.service';
+import { InstagramCrosspostService } from '../instagram-crosspost/instagram-crosspost.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { ArticleProcessingService } from './article-processing.service';
 import { ArticlesService } from './articles.service';
@@ -15,29 +15,29 @@ export class ArticlePublishingService {
   private readonly autoPublishMaxPerRun: number;
   private readonly autoPublishFreshHours: number;
   private readonly telegramDailyPublishLimit: number;
-  private readonly facebookBackfillEnabled: boolean;
-  private readonly facebookBackfillLimit: number;
-  private readonly facebookCrosspostMaxRetryCount: number;
-  private readonly facebookCrosspostMaxPerRun: number;
-  private readonly facebookCrosspostDailyLimit: number;
+  private readonly instagramBackfillEnabled: boolean;
+  private readonly instagramBackfillLimit: number;
+  private readonly instagramCrosspostMaxRetryCount: number;
+  private readonly instagramCrosspostMaxPerRun: number;
+  private readonly instagramCrosspostDailyLimit: number;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly articlesService: ArticlesService,
     private readonly articleProcessingService: ArticleProcessingService,
     private readonly telegramService: TelegramService,
-    private readonly facebookCrosspostService: FacebookCrosspostService,
+    private readonly instagramCrosspostService: InstagramCrosspostService,
   ) {
     this.autoPublishEnabled = this.getBooleanConfig('AUTO_PUBLISH_ENABLED', true);
     this.telegramPublishingEnabled = this.getBooleanConfig('TELEGRAM_PUBLISHING_ENABLED', true);
     this.autoPublishMaxPerRun = this.getPositiveNumberConfig('AUTO_PUBLISH_MAX_PER_RUN', 1);
     this.autoPublishFreshHours = this.getPositiveNumberConfig('AUTO_PUBLISH_FRESH_HOURS', 24);
     this.telegramDailyPublishLimit = this.getPositiveNumberConfig('TELEGRAM_DAILY_PUBLISH_LIMIT', 10);
-    this.facebookBackfillEnabled = this.getBooleanConfig('FACEBOOK_BACKFILL_ENABLED', false);
-    this.facebookBackfillLimit = this.getPositiveNumberConfig('FACEBOOK_BACKFILL_LIMIT', 1);
-    this.facebookCrosspostMaxRetryCount = this.getPositiveNumberConfig('FACEBOOK_CROSSPOST_MAX_RETRY_COUNT', 3);
-    this.facebookCrosspostMaxPerRun = this.getPositiveNumberConfig('FACEBOOK_CROSSPOST_MAX_PER_RUN', 1);
-    this.facebookCrosspostDailyLimit = this.getPositiveNumberConfig('FACEBOOK_CROSSPOST_DAILY_LIMIT', 10);
+    this.instagramBackfillEnabled = this.getBooleanConfig('INSTAGRAM_BACKFILL_ENABLED', false);
+    this.instagramBackfillLimit = this.getPositiveNumberConfig('INSTAGRAM_BACKFILL_LIMIT', 1);
+    this.instagramCrosspostMaxRetryCount = this.getPositiveNumberConfig('INSTAGRAM_CROSSPOST_MAX_RETRY_COUNT', 3);
+    this.instagramCrosspostMaxPerRun = this.getPositiveNumberConfig('INSTAGRAM_CROSSPOST_MAX_PER_RUN', 1);
+    this.instagramCrosspostDailyLimit = this.getPositiveNumberConfig('INSTAGRAM_CROSSPOST_DAILY_LIMIT', 10);
   }
 
   async publishArticle(articleId: number): Promise<Article> {
@@ -53,7 +53,7 @@ export class ArticlePublishingService {
         ? currentArticle
         : this.articlesService.markPublished(articleId, currentArticle.telegramMessageId);
 
-      await this.crosspostPublishedArticle(articleId);
+      await this.crosspostPublishedArticleToInstagram(articleId);
       return this.articlesService.findOne((await publishedArticle).id);
     }
 
@@ -96,7 +96,7 @@ export class ArticlePublishingService {
     try {
       const telegramMessageId = await this.telegramService.publishArticle(article);
       await this.articlesService.markPublished(article.id, telegramMessageId);
-      await this.crosspostPublishedArticle(article.id);
+      await this.crosspostPublishedArticleToInstagram(article.id);
       this.logger.log(`published articleId=${article.id} telegramMessageId=${telegramMessageId}`);
       return this.articlesService.findOne(article.id);
     } catch (error) {
@@ -176,9 +176,9 @@ export class ArticlePublishingService {
     return publishedCount;
   }
 
-  async backfillFacebookCrossposts(limit?: number) {
-    if (!this.facebookCrosspostService.isEnabled()) {
-      this.logger.warn('facebook backfill skipped because FACEBOOK_CROSSPOST_ENABLED=false');
+  async backfillInstagramCrossposts(limit?: number) {
+    if (!this.instagramCrosspostService.isEnabled()) {
+      this.logger.warn('instagram backfill skipped because INSTAGRAM_CROSSPOST_ENABLED=false');
       return {
         scanned: 0,
         posted: 0,
@@ -188,8 +188,8 @@ export class ArticlePublishingService {
       };
     }
 
-    if (!this.facebookBackfillEnabled) {
-      this.logger.warn('facebook backfill skipped because FACEBOOK_BACKFILL_ENABLED=false');
+    if (!this.instagramBackfillEnabled) {
+      this.logger.warn('instagram backfill skipped because INSTAGRAM_BACKFILL_ENABLED=false');
       return {
         scanned: 0,
         posted: 0,
@@ -199,10 +199,10 @@ export class ArticlePublishingService {
       };
     }
 
-    const requestedLimit = typeof limit === 'number' && limit > 0 ? limit : this.facebookBackfillLimit;
+    const requestedLimit = typeof limit === 'number' && limit > 0 ? limit : this.instagramBackfillLimit;
     const { start, end } = getTashkentDayRange();
-    const postedToday = await this.articlesService.countFacebookPostedBetween(start, end);
-    const dailyRemaining = Math.max(0, this.facebookCrosspostDailyLimit - postedToday);
+    const postedToday = await this.articlesService.countInstagramPostedBetween(start, end);
+    const dailyRemaining = Math.max(0, this.instagramCrosspostDailyLimit - postedToday);
     if (dailyRemaining === 0) {
       return {
         scanned: 0,
@@ -213,8 +213,8 @@ export class ArticlePublishingService {
       };
     }
 
-    const runLimit = Math.min(requestedLimit, this.facebookBackfillLimit, dailyRemaining);
-    const articles = await this.articlesService.findFacebookBackfillCandidates(requestedLimit);
+    const runLimit = Math.min(requestedLimit, this.instagramBackfillLimit, dailyRemaining);
+    const articles = await this.articlesService.findInstagramBackfillCandidates(requestedLimit);
 
     let posted = 0;
     let skippedAlreadyPosted = 0;
@@ -227,7 +227,7 @@ export class ArticlePublishingService {
         break;
       }
 
-      const result = await this.crosspostPublishedArticle(articles[index]);
+      const result = await this.crosspostPublishedArticleToInstagram(articles[index]);
       if (result === 'posted') {
         posted += 1;
       } else if (result === 'already_posted') {
@@ -238,7 +238,7 @@ export class ArticlePublishingService {
     }
 
     this.logger.log(
-      `facebook backfill completed scanned=${articles.length} posted=${posted} skippedAlreadyPosted=${skippedAlreadyPosted} skippedDailyLimit=${skippedDailyLimit} failed=${failed}`,
+      `instagram backfill completed scanned=${articles.length} posted=${posted} skippedAlreadyPosted=${skippedAlreadyPosted} skippedDailyLimit=${skippedDailyLimit} failed=${failed}`,
     );
 
     return {
@@ -250,9 +250,9 @@ export class ArticlePublishingService {
     };
   }
 
-  async retryFailedFacebookCrossposts() {
-    if (!this.facebookCrosspostService.isEnabled()) {
-      this.logger.warn('facebook retry skipped because FACEBOOK_CROSSPOST_ENABLED=false');
+  async retryFailedInstagramCrossposts(limit?: number) {
+    if (!this.instagramCrosspostService.isEnabled()) {
+      this.logger.warn('instagram retry skipped because INSTAGRAM_CROSSPOST_ENABLED=false');
       return {
         scanned: 0,
         posted: 0,
@@ -263,8 +263,8 @@ export class ArticlePublishingService {
     }
 
     const { start, end } = getTashkentDayRange();
-    const postedToday = await this.articlesService.countFacebookPostedBetween(start, end);
-    const dailyRemaining = Math.max(0, this.facebookCrosspostDailyLimit - postedToday);
+    const postedToday = await this.articlesService.countInstagramPostedBetween(start, end);
+    const dailyRemaining = Math.max(0, this.instagramCrosspostDailyLimit - postedToday);
     if (dailyRemaining === 0) {
       return {
         scanned: 0,
@@ -275,10 +275,11 @@ export class ArticlePublishingService {
       };
     }
 
-    const runLimit = Math.min(this.facebookCrosspostMaxPerRun, dailyRemaining);
-    const articles = await this.articlesService.findFailedFacebookCrosspostCandidates(
-      this.facebookCrosspostMaxPerRun,
-      this.facebookCrosspostMaxRetryCount,
+    const requestedLimit = typeof limit === 'number' && limit > 0 ? limit : this.instagramCrosspostMaxPerRun;
+    const runLimit = Math.min(requestedLimit, this.instagramCrosspostMaxPerRun, dailyRemaining);
+    const articles = await this.articlesService.findFailedInstagramCrosspostCandidates(
+      requestedLimit,
+      this.instagramCrosspostMaxRetryCount,
     );
 
     let posted = 0;
@@ -292,7 +293,7 @@ export class ArticlePublishingService {
         break;
       }
 
-      const result = await this.crosspostPublishedArticle(articles[index]);
+      const result = await this.crosspostPublishedArticleToInstagram(articles[index]);
       if (result === 'posted') {
         posted += 1;
       } else if (result === 'already_posted') {
@@ -303,7 +304,7 @@ export class ArticlePublishingService {
     }
 
     this.logger.log(
-      `facebook retry completed scanned=${articles.length} posted=${posted} skippedAlreadyPosted=${skippedAlreadyPosted} skippedDailyLimit=${skippedDailyLimit} failed=${failed}`,
+      `instagram retry completed scanned=${articles.length} posted=${posted} skippedAlreadyPosted=${skippedAlreadyPosted} skippedDailyLimit=${skippedDailyLimit} failed=${failed}`,
     );
 
     return {
@@ -360,8 +361,8 @@ export class ArticlePublishingService {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 
-  private async crosspostPublishedArticle(articleOrId: number | ({ source: { name: string } } & Article)) {
-    if (!this.facebookCrosspostService.isEnabled()) {
+  private async crosspostPublishedArticleToInstagram(articleOrId: number | ({ source: { name: string } } & Article)) {
+    if (!this.instagramCrosspostService.isEnabled()) {
       return 'skipped' as const;
     }
 
@@ -369,25 +370,36 @@ export class ArticlePublishingService {
       typeof articleOrId === 'number' ? await this.articlesService.findOneForPublishing(articleOrId) : articleOrId;
 
     if (!article.telegramMessageId) {
-      await this.articlesService.markFacebookCrosspostSkipped(article.id, 'Telegram message is missing for Facebook cross-post');
+      await this.articlesService.markInstagramCrosspostSkipped(
+        article.id,
+        'Telegram message is missing for Instagram cross-post',
+      );
       return 'skipped' as const;
     }
 
-    if (article.facebookPostId || article.facebookCrosspostStatus === 'POSTED') {
+    if (!article.imageUrl) {
+      await this.articlesService.markInstagramCrosspostSkipped(article.id, 'Instagram publishing requires imageUrl');
+      return 'skipped' as const;
+    }
+
+    if (article.instagramPostId || article.instagramCrosspostStatus === 'POSTED') {
       return 'already_posted' as const;
     }
 
-    await this.articlesService.markFacebookCrosspostPending(article.id);
-    const result = await this.facebookCrosspostService.crosspostArticle(article);
+    await this.articlesService.markInstagramCrosspostPending(article.id);
+    const result = await this.instagramCrosspostService.crosspostArticle(article);
 
     if (result.success) {
-      await this.articlesService.markFacebookCrossposted(article.id, result.facebookPostId);
-      this.logger.log(`facebook cross-posted articleId=${article.id} facebookPostId=${result.facebookPostId ?? 'n/a'}`);
+      await this.articlesService.markInstagramCrossposted(article.id, result.instagramPostId);
+      this.logger.log(`instagram cross-posted articleId=${article.id} instagramPostId=${result.instagramPostId ?? 'n/a'}`);
       return 'posted' as const;
     }
 
-    await this.articlesService.markFacebookCrosspostFailed(article.id, result.error || 'Unknown Facebook cross-post error');
-    this.logger.warn(`facebook cross-post failed articleId=${article.id} error=${result.error || 'unknown'}`);
+    await this.articlesService.markInstagramCrosspostFailed(
+      article.id,
+      result.error || 'Unknown Instagram cross-post error',
+    );
+    this.logger.warn(`instagram cross-post failed articleId=${article.id} error=${result.error || 'unknown'}`);
     return 'failed' as const;
   }
 }
